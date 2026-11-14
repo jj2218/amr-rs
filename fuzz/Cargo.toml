@@ -1,0 +1,39 @@
+[package]
+name = "amr-nb-fuzz"
+version = "0.0.0"
+description = "cargo-fuzz targets (nightly, `just fuzz` only; not part of the stable workspace)"
+publish = false
+edition = "2024"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+amr-nb = { path = "../crates/amr-nb" }
+ref26073-sys = { path = "../crates/ref26073-sys" }
+
+# Its own workspace: kept out of the stable one (`just check`, CI).
+[workspace]
+
+[[bin]]
+name = "rfc4867"
+path = "fuzz_targets/rfc4867.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_vs_ref"
+path = "fuzz_targets/decode_vs_ref.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "encode_vs_ref"
+path = "fuzz_targets/encode_vs_ref.rs"
+test = false
+doc = false
+bench = false

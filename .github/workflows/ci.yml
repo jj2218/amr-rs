@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The 3GPP server refuses GitHub's runners, so CI can't fetch the oracles: it checks what builds
+# without them (guard, format, the library on x86-64 and aarch64, docs, the package). The tests
+# against the vectors and the reference C run locally: `just check`.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Installs the toolchain, components and targets pinned in rust-toolchain.toml.
+      - run: rustup toolchain install
+      - uses: extractions/setup-just@v4
+      - run: just rules fmt-check
+      - run: cargo clippy -p amr-nb --lib --locked -- -D warnings
+      - run: RUSTFLAGS="--cfg amr_nb_portable" cargo clippy -p amr-nb --lib --locked -- -D warnings
+      - run: cargo clippy -p amr-nb --lib --locked --target aarch64-unknown-linux-gnu -- -D warnings
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc -p amr-nb --no-deps --locked
+      - run: cargo package -p amr-nb --locked
