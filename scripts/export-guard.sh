@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Export guard: run in a product repo exported from the workbench (`just rules` there, its CI,
-# and scripts/ship.sh before each release commit). Fails on anything that must never ship:
-# workbench-only files, 3GPP or opencore source, test vectors or archives, references to files that aren't exported, and `just` recipes the docs mention but don't exist.
+# Export guard: `just rules`, CI, and every release before its commit. This repository is
+# exported from a private development repository; the guard fails on anything that must never
+# be in it: development-only files, 3GPP or opencore source, test vectors or archives,
+# references to files that aren't here, and `just` recipes the docs mention but don't exist.
 # Checks tracked and untracked (not ignored) files, so it runs before the first commit too.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -12,9 +13,9 @@ text=$(grep -vE "^($self|(.*/)?(LICENSE|NOTICE))$" <<<"$files" || true)
 scan() { tr '\n' '\0' <<<"$text" | xargs -0 grep -nE "$1" -- 2>/dev/null | head -5 || true; }
 
 out=$(
-  # Workbench-only paths and downloads.
+  # Development-only paths and downloads.
   grep -E '^(CLAUDE\.md|\.claude/|\.devcontainer/|docs/(FLAGS|ideas|structure|porting)\.md|docs/spikes/|spikes/|ship/|\.cache/|fuzz/(artifacts|corpus)/|scripts/(doctor|ship|commit|pr)\.sh)' <<<"$files" \
-    | sed 's/^/workbench-only path: /' || true
+    | sed 's/^/development-only path: /' || true
   # Vectors, archives, C++ (opencore's sources are .cpp).
   grep -iE '\.(inp|cod|out|zip|tar|gz|tgz|xz|cpp|cc)$' <<<"$files" | sed 's/^/vector, archive or C++ file: /' || true
   # C files: only our own FFI shims, each saying so on its first line.

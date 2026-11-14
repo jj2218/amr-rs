@@ -15,12 +15,21 @@ fmt-check:
     cargo fmt --all --check
     cargo fmt --manifest-path fuzz/Cargo.toml --check
 
-lint: opencore vectors
+lint: opencore vectors msrv
     cargo clippy --workspace --all-targets --locked -- -D warnings
     RUSTFLAGS="--cfg amr_nb_portable" CARGO_TARGET_DIR=target/portable cargo clippy -p amr-nb --all-targets --locked -- -D warnings
     cargo clippy --manifest-path fuzz/Cargo.toml --locked -- -D warnings
     cargo clippy -q -p amr-nb --lib --locked --target aarch64-unknown-linux-gnu -- -D warnings
     RUSTDOCFLAGS="-D warnings" cargo doc -q -p amr-nb --no-deps --locked
+
+# The library builds with its minimum supported Rust (`rust-version` in Cargo.toml; installs it)
+msrv:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+    rustup toolchain install "$v" --profile minimal --no-self-update >/dev/null 2>&1
+    CARGO_TARGET_DIR=target/msrv cargo "+$v" check -q -p amr-nb --lib --locked
+    echo "msrv: amr-nb builds with Rust $v"
 
 # Codec tests vs the C oracles, twice: runtime AVX2 dispatch (default) and the portable path;
 # then the vectors with the SSE2 kernels' array forms (the non-x86 bodies).

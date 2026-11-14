@@ -149,8 +149,8 @@ pub(super) fn calc_filt_energies(
     let (xn, xn2, y1) = (&xn[..L_SUBFR], &xn2[..L_SUBFR], &y1[..L_SUBFR]);
     let scaled_y2: [i16; L_SUBFR] = core::array::from_fn(|i| y2[i] >> 3);
     // The C's three L_mac chains. |tmp| <= 4096: s1's terms are >= 0 and sum below 2^31, so
-    // it never saturates (a plain sum). s2, s3 run as the chains: plain sums under a
-    // 2 max|x| sum|tmp| < MAX_32 bound measured flat in every mode (RESULTS win-back audit).
+    // it never saturates (a plain sum). s2, s3 run as the chains: a plain-sum fast path under
+    // a 2 max|x| sum|tmp| < MAX_32 bound measured no faster in any mode.
     let s1 = scaled_y2.iter().fold(init, |s: i32, &t| {
         s.wrapping_add((t as i32 * t as i32) << 1)
     });

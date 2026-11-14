@@ -616,7 +616,7 @@ mod vs_c {
             let amp = [0x7fff, 0x3fff, 0x0fff][n % 3];
             let mut xs: Vec<i16> = (0..len).map(|_| (g.i16() as i32 & amp) as i16).collect();
             match n % 8 {
-                // opencore's l_var3 == product quirk: [a, a, 2a] (no longer special).
+                // opencore's l_var3 == product quirk: [a, a, 2a] (an ordinary sum in TS 26.073).
                 0 => xs.extend([13378, -13378, 26756]),
                 1 if len > 0 => xs[len / 2] = MIN_16,
                 _ => {}

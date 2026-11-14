@@ -4,6 +4,8 @@ members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"
+# The oldest Rust that builds amr-nb (let-chains, `as_chunks`), checked by `just msrv`.
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/jj2218/amr-rs"
 

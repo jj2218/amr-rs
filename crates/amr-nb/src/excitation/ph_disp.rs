@@ -154,7 +154,8 @@ pub(crate) fn ph_disp(
 
 /// The total excitation, per sample (independent lanes, branchless so they vectorise):
 /// `x = round(l_shl(L_mac(l_mult(x, pf), c, g), shift))` with TS 26.073's operators (both
-/// callers, `ph_disp` and the decoder; `MAC` is kept for the call sites and no longer differs).
+/// callers, `ph_disp` and the decoder; `MAC` names the call site's C operator, and both values
+/// give the same result).
 /// The decoder's `shift` is 1 or 2; any shift below 16 is exact (it goes through `l_shl`, whose
 /// branch on it is loop-invariant; tested -40..=3). No overflow output: the decoder resets the
 /// flag before `Syn_filt`, its only reader, as the reference does.
@@ -500,7 +501,7 @@ mod vs_c {
             cls[0] += (p == 0x4000_0000) as u32;
             unsafe {
                 let a = shim_L_mult(*xi, pf, &mut o);
-                // TS 26.073 accumulates with L_mac at both call sites (`mac` no longer matters)
+                // TS 26.073 accumulates with L_mac at both call sites (`mac` doesn't change the result)
                 if mac {
                     cls[1] += (r == 0x4000_0000) as u32;
                     cls[2] += (a == r && a.checked_add(r << 1).is_none()) as u32;

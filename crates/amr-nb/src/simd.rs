@@ -451,9 +451,9 @@ pub(crate) use crate::excitation::pred_lt::block_portable as pred_block;
 /// chain), and its terms in later outputs (k >= 3) as one `pmaddwd` per half off the chain.
 /// Output m reads its lane right after the update of output m - 3, the last one it needs:
 /// read from the latest accumulators, the (zero) updates of m - 2 and m - 1 put a `pmaddwd` on
-/// the chain (1.2× the old kernel). The outputs and the history stay in registers from block
+/// the chain (1.2× slower). The outputs and the history stay in registers from block
 /// to block (stored as elements and reloaded as vectors they missed store forwarding). Over
-/// arrays, LLVM spilled the lanes (2×) and scalarised pair-interleaved columns (RESULTS).
+/// arrays, LLVM spilled the lanes (2× slower) and scalarised pair-interleaved columns.
 #[cfg(all(target_arch = "x86_64", not(amr_nb_arrays)))]
 #[inline(always)]
 pub(crate) fn syn_blocks(

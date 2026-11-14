@@ -212,7 +212,7 @@ impl<const T: usize, const N: usize, const W: usize> Tm<T, N, W> {
 /// of h2 every step, and the lanes are row m's cells of track tb = (r - k - 1) mod T
 /// (j = tb + T ib). Steps run unrolled by T (`tm_step`), so every index is a constant and the
 /// T sums stay in registers (as loops over r or with moving offsets, index math and
-/// store-forwarding stalls cost 1.5–3×, RESULTS.md).
+/// store-forwarding stalls cost 1.5–3×).
 /// Portable body of the dispatched `cor_h_tm` and of MR102's `cor_h_search_8i40` (`NARROW`:
 /// see the sign scaling).
 #[inline(always)]
@@ -643,9 +643,8 @@ pub(crate) const STEP5_SHIFTS: [(u32, u32, u32); 4] =
 /// never saturate, wrapping sums are the C's, and `round` never saturates (<= 0x7fff_7fff).
 /// Pulse p's chain: alp0 (from the previous `alp`, or `rr` for p = 1), the diagonal term,
 /// and p cross terms (one per earlier pulse), each at its 16-bit extremes; `alp` is `round`
-/// of the chain. Every partial sum is a sub-sum, so the extremes bound it too. (Before this
-/// was proven, a per-row guard, its |term| sums and an exact scalar fallback ran on every
-/// block: RESULTS loop #20.) Three pulses after the first (`step5_block` asserts P <= 4).
+/// of the chain. Every partial sum is a sub-sum, so the extremes bound it too, and the
+/// blocks need no overflow guard. Three pulses after the first (`step5_block` asserts P <= 4).
 const _: () = {
     let (lo, hi) = (-32768i64, 32767i64);
     let mut alp = (lo, hi); // pulse 1 starts from the rr diagonal
@@ -1764,7 +1763,8 @@ fn search_pairs<const T: usize, const N: usize, const W: usize, const P: usize, 
     // The C's T - 1 iterations (one per rotation of `ipos`) are independent until the final
     // comparison, and each is a serial chain of pairs (a pair's rows depend on the winners
     // before it): made level by level, the iterations are independent chains in flight
-    // (MR122 AVX2 0.75 -> 0.66 of the old kernel with `best_i32`; flat with `best_i16`).
+    // (MR122 AVX2 with `best_i32`: 12% less time than iteration by iteration; no gain with
+    // `best_i16`).
     // Rows `..T - 1` are used (`[_; T - 1]` isn't a valid generic length).
     let mut ips = [[0i16; P]; T];
     for ip in ips.iter_mut().take(T - 1) {

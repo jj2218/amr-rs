@@ -57,7 +57,7 @@ Measured, with the recipe that reproduces each number, in
 ## Scope
 Single channel. RTP without interleaving, CRCs or robust sorting (the SDP defaults); `.amr`
 files without the multi-channel header. Frame types 9–14 (other codecs' SID, reserved) are
-reported as errors.
+reported as errors. Needs Rust 1.88 or later.
 
 ## License
 Apache-2.0 ([LICENSE](https://github.com/jj2218/amr-rs/blob/main/crates/amr-nb/LICENSE)).
