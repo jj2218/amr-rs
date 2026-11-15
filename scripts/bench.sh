@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the codec benchmark once and run it pinned to one core (less noise on laptops).
+# CRATE=<crate> (default amr-nb): which codec. Build its benchmark once and run it pinned to one core (less noise on laptops).
 # BENCH=kern: ns per call of the hot encoder kernels, Rust vs C (an ignored lib test).
 # AB=<git ref>: that ref (A) vs the working tree (B), interleaved runs of the "all" line
 # (BENCH=enc by default; BENCH_MODE=<mode> runs and compares only that mode, e.g. 122); the C drifts
@@ -8,12 +8,13 @@
 # AB=<ref> BENCH=kern: per kernel, min ns over 3 interleaved runs of each side, and B/A.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+crate=${CRATE:-amr-nb}  # CRATE=amr-wb: the other codec
 # BENCH=stages: the encoder's and decoder's µs per frame per stage (`--cfg amr_nb_stages` timers,
 # mean of all reps, timer overhead included): time attribution, as `perf` is unavailable.
 if [ "${BENCH:-}" = stages ]; then
     export RUSTFLAGS="${RUSTFLAGS:-} --cfg amr_nb_stages" CARGO_TARGET_DIR="$PWD/target/stages"
     unset BENCH
-    exe=$(cargo bench -p amr-nb --bench codec --no-run 2>&1 | sed -n 's/.*Executable .*(\(.*\)).*/\1/p' | tail -1)
+    exe=$(cargo bench -p "$crate" --bench codec --no-run 2>&1 | sed -n 's/.*Executable .*(\(.*\)).*/\1/p' | tail -1)
     taskset -c "${BENCH_CPU:-2}" "$exe" | grep "^stages"
     exit
 fi
@@ -22,10 +23,10 @@ fi
 # The portable build gets its own target dirs (as in `just test`), so switching paths doesn't
 # rebuild the fat-LTO binaries each time.
 ab=target/ab
-case "${RUSTFLAGS:-}" in *amr_nb_portable*)
+case "${RUSTFLAGS:-}" in *portable*)
     export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/portable}"; ab=target/ab-portable ;; esac
-build() { cargo bench -p amr-nb --bench codec --no-run 2>&1 | sed -n 's/.*Executable .*(\(.*\)).*/\1/p' | tail -1; }
-kern() { taskset -c "${BENCH_CPU:-2}" cargo test -q --release -p amr-nb --lib kernel_timing \
+build() { cargo bench -p "$crate" --bench codec --no-run 2>&1 | sed -n 's/.*Executable .*(\(.*\)).*/\1/p' | tail -1; }
+kern() { taskset -c "${BENCH_CPU:-2}" cargo test -q --release -p "$crate" --lib kernel_timing \
     -- --ignored --nocapture 2>&1 | grep -E " ns$|error|panicked"; }
 if [ -n "${AB:-}" ]; then
     src=target/ab-src

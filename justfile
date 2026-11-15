@@ -17,10 +17,10 @@ fmt-check:
 
 lint: opencore vectors msrv
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    RUSTFLAGS="--cfg amr_nb_portable" CARGO_TARGET_DIR=target/portable cargo clippy -p amr-nb --all-targets --locked -- -D warnings
+    RUSTFLAGS="--cfg portable" CARGO_TARGET_DIR=target/portable cargo clippy -p amr-nb --all-targets --locked -- -D warnings
     cargo clippy --manifest-path fuzz/Cargo.toml --locked -- -D warnings
-    cargo clippy -q -p amr-nb --lib --locked --target aarch64-unknown-linux-gnu -- -D warnings
-    RUSTDOCFLAGS="-D warnings" cargo doc -q -p amr-nb --no-deps --locked
+    cargo clippy -q -p amr-nb -p amr-wb --lib --locked --target aarch64-unknown-linux-gnu -- -D warnings
+    RUSTDOCFLAGS="-D warnings" cargo doc -q -p amr-nb -p amr-wb --no-deps --locked
 
 # The library builds with its minimum supported Rust (`rust-version` in Cargo.toml; installs it)
 msrv:
@@ -28,17 +28,17 @@ msrv:
     set -euo pipefail
     v=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
     rustup toolchain install "$v" --profile minimal --no-self-update >/dev/null 2>&1
-    CARGO_TARGET_DIR=target/msrv cargo "+$v" check -q -p amr-nb --lib --locked
-    echo "msrv: amr-nb builds with Rust $v"
+    CARGO_TARGET_DIR=target/msrv cargo "+$v" check -q -p amr-nb -p amr-wb --lib --locked
+    echo "msrv: amr-nb and amr-wb build with Rust $v"
 
 # Codec tests vs the C oracles, twice: runtime AVX2 dispatch (default) and the portable path;
 # then the vectors with the SSE2 kernels' array forms (the non-x86 bodies).
 test: opencore vectors
     cargo test --workspace --locked
-    RUSTFLAGS="--cfg amr_nb_portable" CARGO_TARGET_DIR=target/portable cargo test -q -p amr-nb --locked
-    RUSTFLAGS="--cfg amr_nb_portable --cfg amr_nb_arrays" CARGO_TARGET_DIR=target/arrays cargo test -q --release -p amr-nb --locked --test conformance
+    RUSTFLAGS="--cfg portable" CARGO_TARGET_DIR=target/portable cargo test -q -p amr-nb --locked
+    RUSTFLAGS="--cfg portable --cfg amr_nb_arrays" CARGO_TARGET_DIR=target/arrays cargo test -q --release -p amr-nb --locked --test conformance
 
-# Download + SHA-verify the 3GPP TS 26.074 test vectors and TS 26.073 reference C into .cache/3gpp (never committed)
+# Download + SHA-verify the 3GPP test vectors (TS 26.074, TS 26.174) and reference C (TS 26.073, TS 26.173) into .cache/3gpp (never committed)
 vectors:
     @bash scripts/vectors.sh
 
@@ -46,15 +46,17 @@ vectors:
 opencore:
     @bash scripts/opencore.sh
 
-# Bit-exactness vs the whole 3GPP TS 26.074 set, decoder and encoder (one summary line each)
+# Bit-exactness, one summary line each: amr-nb vs the whole 3GPP TS 26.074 set (decoder and encoder); amr-wb vs the TS 26.174 set and the TS 26.173 reference on stress streams
 conform: opencore vectors
     @cargo test -q --release -p amr-nb --test conformance -- --nocapture 2>&1 | grep -E "bit-exact|failing|mismatch|panicked|error" | sed "s/^\.*//" || true
+    @cargo test -q --release -p amr-wb --test conformance -- --nocapture 2>&1 | grep -E "bit-exact|panicked|error" | sed "s/^\.*//" || true
+    @WB_STRESS_STREAMS=200 cargo test -q --release -p amr-wb --test vs_ref -- --nocapture 2>&1 | grep -E "bit-exact|differs|panicked|error" | sed "s/^\.*//" || true
 
-# Speed, Rust vs opencore C (-O3), µs/frame per mode, pinned core (BENCH_CPU=n, BENCH=dec|enc|stages|kern, AB=<ref>; see scripts/bench.sh)
+# Speed, Rust vs opencore C (-O3), µs/frame per mode, pinned core (CRATE=amr-wb for AMR-WB; BENCH_CPU=n, BENCH=dec|enc|stages|kern, AB=<ref>; see scripts/bench.sh)
 bench: opencore vectors
     @bash scripts/bench.sh
 
-# Rank the codec's functions by self cost (callgrind; BENCH=dec|enc, BENCH_MODE=<mode>)
+# Rank the codec's functions by self cost (callgrind; CRATE=amr-wb, BENCH=dec|enc, BENCH_MODE=<mode>)
 profile: opencore vectors
     @bash scripts/profile.sh
 
@@ -68,6 +70,7 @@ asm symbol:
 fuzz target="all" seconds="60": vectors
     @bash scripts/fuzz.sh "$1" "$2"
 
-# Regenerate crates/amr-nb/src/tables.rs from the opencore C tables
+# Regenerate the codec crates' src/tables.rs from the opencore C tables
 gen-tables: opencore
-    @python3 -I scripts/gen_tables.py .cache/opencore/opencore-amr-0.1.6/opencore/codecs_v2/audio/gsm_amr/amr_nb crates/amr-nb/src/tables.rs
+    @python3 -I scripts/gen_tables.py nb .cache/opencore/opencore-amr-0.1.6/opencore/codecs_v2/audio/gsm_amr/amr_nb crates/amr-nb/src/tables.rs
+    @python3 -I scripts/gen_tables.py wb .cache/opencore/opencore-amr-0.1.6/opencore/codecs_v2/audio/gsm_amr/amr_wb crates/amr-wb/src/tables.rs

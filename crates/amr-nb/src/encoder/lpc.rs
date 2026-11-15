@@ -425,7 +425,7 @@ pub(crate) static MR515_3_SOA: Soa<4, 128> = soa(&MR515_3_LSF, 4);
 /// `simd::vq_subvec_sse2`, i16 lanes: SSE2 has no `pmulld`.)
 #[inline(always)]
 #[cfg_attr(
-    all(target_arch = "x86_64", amr_nb_portable, not(amr_nb_arrays)),
+    all(target_arch = "x86_64", portable, not(amr_nb_arrays)),
     allow(dead_code) // that build runs `simd::vq_subvec_sse2` only
 )]
 pub(crate) fn vq_subvec_portable<const D: usize, const VQ_W: usize>(

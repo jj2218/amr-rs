@@ -1,8 +1,9 @@
 # Results
 
-amr-nb's measured results. Every number is reproducible with the recipe or command in its
-heading; the oracles (3GPP vectors and reference C, opencore-amr) are downloaded and verified on
-first use (see the README).
+Measured results of amr-nb (the sections below) and amr-wb ([its own section](#amr-wb-amr-wb-decoder)
+at the end). Every number is reproducible with the recipe or command in its heading; the
+oracles (3GPP vectors and reference C, opencore-amr) are downloaded and verified on first use
+(see the README).
 
 ## Conformance (`just conform`)
 The whole 3GPP TS 26.074 set: NODTX (all 8 modes, T00–T20, T22), T21 mode switching, DTX
@@ -199,3 +200,97 @@ uses lengths 22 and 40).
 
 The Rust codec's only `unsafe` is `src/simd.rs` (runtime AVX2 dispatch and SSE2 transposes),
 plus FFI in the tests.
+
+## amr-wb (AMR-WB decoder)
+The AMR-WB decoder (3GPP TS 26.173, ITU-T G.722.2), ported from opencore-amr 0.1.6's decoder
+and corrected to the specification wherever the two differ (below). No `unsafe`.
+
+### Conformance (`just conform`)
+The whole decoder set of 3GPP TS 26.174 v19.0.0 (j00, its latest version): every `.cod` with
+an `.out`. T00–T20 in each of the 9 modes, T22 mode switching, and the DTX sequences (Dtx1–5 at
+23.85 kbit/s, Dtx3 in every mode). Bit-exact = every output sample identical.
+
+| decoder | cases | frames | bit-exact |
+|---|---:|---:|---:|
+| amr-wb (Rust) | 221 | 119,660 | **221/221** |
+| 3GPP TS 26.173 reference C (`ref26173-sys`) | 221 | 119,660 | 221/221 |
+| opencore 0.1.6 (C), its frame loop | 221 | 119,660 | 189/221 |
+
+opencore fails the same 32 vectors (T02, T13, T20 in most modes, T05, T08, T14, Dtx2) on the
+Rel-11 vectors (b00), so its misses are its own deviations (defects below), not later changes.
+Since opencore, TS 26.173 changed the decoder in three places, none visible on the vectors (the
+Rel-11 and current reference each reproduce both vector sets): CR 0026 (2007, late SID_UPDATE
+and a division by zero in DTX_MUTE), CR 0030 (2015, the comfort-noise energy history's initial
+value), both adopted, and CR 0027–0029 (2007), deliberately not adopted (next paragraph). The
+other CRs (0031–0036) change the encoder only.
+
+**The one deliberate difference from TS 26.173:** NO_DATA frames are handled as before CR
+26.173-0027–0029, as opencore does: a NO_DATA frame during speech counts as DTX for the
+hangover logic at once, where the CR first waits for 8 frames without voice activity. The CR's
+rule is covered by a live patent (Nokia US 8090588, EP 2201565). It only changes the comfort
+noise of the next SID_FIRST after NO_DATA frames that arrive mid-speech (frame loss signalled as
+NO_DATA). No vector has NO_DATA mid-speech (asserted by the conformance test).
+
+### Against the TS 26.173 reference (`cargo test -p amr-wb`)
+The unit-test oracle is the 3GPP reference C (`crates/ref26173-sys`, built from the pinned
+download, symbols prefixed `refwb_`).
+- **Whole decoder** on 1,600 stress streams of 120 frames (`just conform` runs 200 per class,
+  `cargo test` 40): real frames with flipped bits, random and all-ones bits (full-scale,
+  clipping signals), bad, lost and degraded frames, SID_FIRST/SID_UPDATE/SID_BAD and NO_DATA
+  sequences, mode switching on every frame. All bit-exact. NO_DATA is generated only in DTX
+  (the excluded difference); `no_data_mid_speech_is_the_one_difference` pins it.
+- **Kernels**: the basic operators and `Pow2`, `Pred_lt4`, `Syn_filt_32`, `Syn_filt` (both
+  orders), and over 40-call sequences `HP50_12k8`, `HP400_12k8`, `Oversamp_16k`, `Filt_6k_7k`,
+  `Filt_7k`, `Deemph_32` (outputs and memories). Each exact fast path (below) has an input class
+  that drives its guard false; forcing each guard true fails these tests.
+
+### Decoder speed (`CRATE=amr-wb just bench`)
+µs per 20 ms frame, best of 15, same machine and builds as amr-nb's tables, on the
+single-mode vectors (93,258 frames per rep). Both run the same frame loop (homing test,
+decode, 14-bit output) on pre-parsed serial bits.
+
+| mode | Rust | C | speedup |
+|---|---:|---:|---:|
+| 6.60 | 27.5 | 32.9 | 1.20× |
+| 8.85 | 24.7 | 31.2 | 1.27× |
+| 12.65 | 23.5 | 28.7 | 1.22× |
+| 14.25 | 23.5 | 29.0 | 1.24× |
+| 15.85 | 23.4 | 29.5 | 1.26× |
+| 18.25 | 23.9 | 30.1 | 1.26× |
+| 19.85 | 23.8 | 30.5 | 1.28× |
+| 23.05 | 24.1 | 31.3 | 1.30× |
+| 23.85 | 27.1 | 34.7 | 1.28× |
+| **all** | **24.6** | **30.9** | **≈1.25×** |
+
+Measured 2026-11-15, scalar code (no SIMD module yet). Exactness costs here: the
+specification's saturating chains are serial where opencore's plain sums vectorise (the
+straight port with the corrections ran at 0.76×). Exact fast paths win it back: a bound
+proves no partial sum can saturate (`2·max|x|·Σ|c| < 2^31`, or from the coefficients alone),
+then a plain dot product runs, with the specification's chain as the fallback.
+
+### Robustness: defects found in opencore's AMR-WB decoder (each absent in the Rust port)
+1. **Wrapping where TS 26.173 saturates** (as amr-nb's defect 10): `HP50_12k8`, `Pred_lt4`,
+   the adaptive codebook's low-pass, `Deemph_32`, `Syn_filt_32`, `Syn_filt`, `Isp_Az` and its
+   polynomials, the noise enhancer (`Mpy_32_16`, `L_add`), the code's tilt filter (it sums two
+   neighbours into one 16-bit argument), `Filt_6k_7k` and `Filt_7k` (which also pre-adds the end
+   taps' samples in 16 bits). On loud signals: 32 of the 221 vectors fail.
+2. **`round` wraps** for `[0x7fff8000, 0x7ffffffe]` to −32768 (only `MAX_32` is special-cased);
+   the same for its `round(x << 1)`.
+3. **Shift counts masked**: `shl`, `L_shl`, `L_shr` take counts modulo 16 or 32 where the
+   specification saturates them; in `voice_factor` and `agc2` plain C shifts by a negative
+   count or one ≥ 32 (UB; x86 masks, `agc2` shifts by 31 instead of halving), and `Pow2`'s
+   final shift likewise for loud comfort noise.
+4. **`norm_s`/`norm_l` of 0 and negative values**: `norm_s(0)` is 11, not 0 (a zero code gain
+   then skews the voicing after lost frames).
+5. **`Scale_sig(x, -3)` saturates in 16 bits**: 32764..32767 become 4095, not 4096, in the
+   excitation's energy and the high band's level.
+6. **The synthesis filters assume `a[0]` = 4096**: `Isp_Az` lowers `a[0]` (adaptive scaling)
+   for comfort noise, which the specification's `Syn_filt_32` and `Syn_filt` follow and
+   opencore's ignore, so its comfort noise comes out louder after rescaling.
+7. **Concealment gains**: the gain histories' pipelined shift leaves `[b1, b1, b2, b3, new]`
+   instead of `[b1, b2, b3, b4, new]`, a bad frame's energy history keeps its oldest entry, and
+   the mean of the past energies is `Σ/8` instead of `Σ/4`: wrong gains after every bad frame.
+8. **DTX mute clamps the comfort-noise energy at 0** (as amr-nb's defect 12), where the
+   specification lets it go negative.
+9. **No CR 0026**: in DTX_MUTE right after a SID update opencore divides by zero
+   (`div_16by16(1024, 0)` returns 0 there), and a late SID_UPDATE mutes.

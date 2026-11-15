@@ -1,0 +1,15 @@
+[package]
+name = "ref26173-sys"
+version = "0.0.0"
+description = "Test oracle only: the 3GPP TS 26.173 AMR-WB reference C code, compiled from the pinned download in .cache/3gpp (never committed); every symbol prefixed `refwb_`"
+publish = false
+edition.workspace = true
+license = "Apache-2.0"
+repository.workspace = true
+
+[build-dependencies]
+cc = "1"
+
+# FFI to C: deliberately without the workspace lints (unsafe_code = "deny"); the empty table
+# says so and silences cargo's missing-lints-inheritance warning.
+[lints]

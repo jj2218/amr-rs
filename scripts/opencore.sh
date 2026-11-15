@@ -10,13 +10,8 @@ SHA=483eb4061088e2b34b358e47540b5d495a96cd468e361050fae615b1809dc4a1
 DIR=.cache/opencore
 TGZ=$DIR/opencore-amr-0.1.6.tar.gz
 
-mkdir -p "$DIR"
-if ! echo "$SHA  $TGZ" | sha256sum -c --status 2>/dev/null; then
-  echo "opencore: downloading $URL"
-  curl -fsSL --retry 3 -o "$TGZ.part" "$URL"
-  mv "$TGZ.part" "$TGZ"
-  echo "$SHA  $TGZ" | sha256sum -c --status || { echo "opencore: SHA-256 MISMATCH for $TGZ" >&2; exit 1; }
-fi
+source scripts/fetch.sh
+fetch "$URL" "$SHA" "$TGZ"
 if [ ! -f "$DIR/.unpacked" ]; then
   rm -rf "$DIR/opencore-amr-0.1.6"
   tar xzf "$TGZ" -C "$DIR"

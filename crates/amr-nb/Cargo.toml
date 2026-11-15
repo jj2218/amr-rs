@@ -16,7 +16,7 @@ repository.workspace = true
 workspace = true
 
 [dev-dependencies]
-opencore-sys = { path = "../opencore-sys" }
+opencore-sys = { path = "../opencore-sys", features = ["nb"] }
 ref26073-sys = { path = "../ref26073-sys" }
 
 [[bench]]

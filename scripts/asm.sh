@@ -3,13 +3,14 @@
 # instructions, then the listing in target/asm.s. Use it when a kernel is slower than its vector
 # work suggests (index math, spills, unaligned reloads, SLP across the wrong loop showed up this
 # way). Usage: scripts/asm.sh <symbol regex>, e.g. 'cor_h_tm.*avx2_copy' or 'simd::cor_h_tm>'.
-# Portable path: RUSTFLAGS="--cfg amr_nb_portable".
+# Portable path: RUSTFLAGS="--cfg portable". CRATE=<crate>: another codec (default amr-nb).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-case "${RUSTFLAGS:-}" in *amr_nb_portable*)
+crate=${CRATE:-amr-nb}  # CRATE=amr-wb: the other codec
+case "${RUSTFLAGS:-}" in *portable*)
     export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/portable}" ;; esac
 [ $# -eq 1 ] || { echo "usage: just asm '<symbol regex>'" >&2; exit 1; }
-exe=$(cargo test -q --release -p amr-nb --lib --no-run --message-format=json 2>/dev/null |
+exe=$(cargo test -q --release -p "$crate" --lib --no-run --message-format=json 2>/dev/null |
     sed -n 's/.*"executable":"\([^"]*\)".*/\1/p' | tail -1)
 [ -x "$exe" ] || { echo "asm: could not build the lib tests" >&2; exit 1; }
 out=target/asm.s

@@ -66,7 +66,15 @@ fn main() {
     let mut b = cc::Build::new();
     // typedefs.h only knows 32-bit `linux && i386` as little-endian PC: the same types here.
     // -fwrapv: basicop2.c detects overflow after a signed add (UB), as 1999 compilers wrapped.
-    b.flag("-w")
+    b // Legacy C: quiet, but what GCC >= 14 and Clang >= 16 reject fails here too (not `-w`,
+        // which also hides -Werror; cc adds -Wall -Wextra before these flags).
+        .flag("-Wno-all")
+        .flag("-Wno-extra")
+        .flag_if_supported("-Wno-builtin-declaration-mismatch")
+        .flag("-Werror=implicit-function-declaration")
+        .flag("-Werror=implicit-int")
+        .flag("-Werror=int-conversion")
+        .flag("-Werror=incompatible-pointer-types")
         .flag("-fwrapv")
         .opt_level(2)
         .include(&src)

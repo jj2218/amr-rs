@@ -1,7 +1,9 @@
-//! Compiles opencore-amr's AMR-NB codec as C99 (as its own `--enable-compile-c` build does).
-//! Sources come from `.cache/opencore/` (run `just opencore`); the list mirrors amrnb/Makefile.am,
-//! plus opencore's VAD option 2 (`vad2`, `r_fft`), which it ships but doesn't build (oracle for
-//! the Rust port's VAD2; the C encoder itself stays VAD1).
+//! Compiles opencore-amr's codecs as C99 (as its own `--enable-compile-c` build does), one
+//! library per feature. Sources come from `.cache/opencore/` (run `just opencore`).
+//! - `nb`: AMR-NB; the list mirrors amrnb/Makefile.am, plus opencore's VAD option 2 (`vad2`,
+//!   `r_fft`), which it ships but doesn't build (oracle for the Rust port's VAD2; the C encoder
+//!   itself stays VAD1).
+//! - `wb`: the AMR-WB decoder; the list mirrors amrwb/Makefile.am, plus `shim_wb.c`.
 use std::path::PathBuf;
 
 const DEC: &[&str] = &[
@@ -104,6 +106,47 @@ const ENC: &[&str] = &[
     "spstproc",
     "ton_stab",
 ];
+const WB_DEC: &[&str] = &[
+    "agc2_amr_wb",
+    "band_pass_6k_7k",
+    "dec_acelp_2p_in_64",
+    "dec_acelp_4p_in_64",
+    "dec_alg_codebook",
+    "dec_gain2_amr_wb",
+    "deemphasis_32",
+    "dtx_decoder_amr_wb",
+    "get_amr_wb_bits",
+    "highpass_400hz_at_12k8",
+    "highpass_50hz_at_12k8",
+    "homing_amr_wb_dec",
+    "interpolate_isp",
+    "isf_extrapolation",
+    "isp_az",
+    "isp_isf",
+    "lagconceal",
+    "low_pass_filt_7k",
+    "median5",
+    "mime_io",
+    "noise_gen_amrwb",
+    "normalize_amr_wb",
+    "oversamp_12k8_to_16k",
+    "phase_dispersion",
+    "pit_shrp",
+    "pred_lt4",
+    "preemph_amrwb_dec",
+    "pvamrwbdecoder",
+    "pvamrwb_math_op",
+    "q_gain2_tab",
+    "qisf_ns",
+    "qisf_ns_tab",
+    "qpisf_2s",
+    "qpisf_2s_tab",
+    "scale_signal",
+    "synthesis_amr_wb",
+    "voice_factor",
+    "wb_syn_filt",
+    "weight_amrwb_lpc",
+];
 const COMMON: &[&str] = &[
     "add",
     "az_lsp",
@@ -196,41 +239,79 @@ fn main() {
         root.display()
     );
     let amr = root.join("opencore/codecs_v2/audio/gsm_amr");
-    let nb = amr.join("amr_nb");
-
-    let mut b = cc::Build::new();
-    b.flag("-x")
-        .flag("c")
-        .flag("-std=c99")
-        .flag("-w")
-        .opt_level(3);
-    if std::env::var_os("CARGO_FEATURE_PIN_UB").is_some() {
-        b.flag("-ftrivial-auto-var-init=zero").flag("-fwrapv");
-    }
-    for inc in [
-        root.join("oscl"),
-        nb.join("dec/src"),
-        nb.join("common/include"),
-        nb.join("dec/include"),
-        amr.join("common/dec/include"),
-        nb.join("enc/src"),
-        nb.join("enc/include"),
-        root.join("amrnb"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("compat"),
-    ] {
-        b.include(inc);
-    }
-    b.file(root.join("amrnb/wrapper.cpp"));
-    b.file(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shim.c"));
-    b.file(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("compat/ops.c"));
-    for (dir, files) in [("dec/src", DEC), ("enc/src", ENC), ("common/src", COMMON)] {
-        for f in files {
-            b.file(nb.join(dir).join(format!("{f}.cpp")));
+    let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let build = || {
+        let mut b = cc::Build::new();
+        b.flag("-x")
+            .flag("c")
+            .flag("-std=c99")
+            // Legacy C: quiet, but what GCC >= 14 and Clang >= 16 reject fails here too (not `-w`,
+            // which also hides -Werror; cc adds -Wall -Wextra before these flags).
+            .flag("-Wno-all")
+            .flag("-Wno-extra")
+            .flag_if_supported("-Wno-builtin-declaration-mismatch")
+            .flag("-Werror=implicit-function-declaration")
+            .flag("-Werror=implicit-int")
+            .flag("-Werror=int-conversion")
+            .flag("-Werror=incompatible-pointer-types")
+            .opt_level(3);
+        if std::env::var_os("CARGO_FEATURE_PIN_UB").is_some() {
+            b.flag("-ftrivial-auto-var-init=zero").flag("-fwrapv");
         }
+        b
+    };
+
+    if std::env::var_os("CARGO_FEATURE_NB").is_some() {
+        let nb = amr.join("amr_nb");
+        let mut b = build();
+        for inc in [
+            root.join("oscl"),
+            nb.join("dec/src"),
+            nb.join("common/include"),
+            nb.join("dec/include"),
+            amr.join("common/dec/include"),
+            nb.join("enc/src"),
+            nb.join("enc/include"),
+            root.join("amrnb"),
+            here.join("compat"),
+        ] {
+            b.include(inc);
+        }
+        b.flag("-include")
+            .flag(here.join("compat/ops.h").to_str().unwrap());
+        b.file(root.join("amrnb/wrapper.cpp"));
+        b.file(here.join("shim.c"));
+        b.file(here.join("compat/ops.c"));
+        for (dir, files) in [("dec/src", DEC), ("enc/src", ENC), ("common/src", COMMON)] {
+            for f in files {
+                b.file(nb.join(dir).join(format!("{f}.cpp")));
+            }
+        }
+        b.compile("opencore_amrnb");
     }
-    b.compile("opencore_amrnb");
+
+    if std::env::var_os("CARGO_FEATURE_WB").is_some() {
+        let wb = amr.join("amr_wb/dec");
+        let mut b = build();
+        for inc in [
+            root.join("oscl"),
+            wb.join("src"),
+            wb.join("include"),
+            amr.join("common/dec/include"),
+            root.join("amrwb"),
+        ] {
+            b.include(inc);
+        }
+        b.file(root.join("amrwb/wrapper.cpp"));
+        b.file(here.join("shim_wb.c"));
+        for f in WB_DEC {
+            b.file(wb.join("src").join(format!("{f}.cpp")));
+        }
+        b.compile("opencore_amrwb");
+    }
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=shim.c");
+    println!("cargo:rerun-if-changed=shim_wb.c");
     println!("cargo:rerun-if-changed=compat");
     println!("cargo:rerun-if-env-changed=OPENCORE_DIR");
 }

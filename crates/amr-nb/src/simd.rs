@@ -9,7 +9,7 @@
 //! results then rest on that body's contract, e.g. `first_min` is lane-width independent, and
 //! the diff tests run on both paths.
 //!
-//! `--cfg amr_nb_portable` compiles the dispatch out, so the diff tests and the conformance
+//! `--cfg portable` compiles the dispatch out, so the diff tests and the conformance
 //! vectors run on both paths (`just test` and `just lint` cover both). Detection cost per call:
 //! one cached atomic load and a branch, against kernels of 90 ns and up. The SSE2 kernels
 //! (x86_64 baseline: both paths, except `vq_subvec_sse2`, the portable body of a dispatched
@@ -26,14 +26,14 @@ use crate::encoder::lpc::vq_pair_portable;
 use crate::encoder::pitch_cl::convolve_portable;
 
 /// Whether the AVX2 copies may run on this CPU.
-#[cfg(all(target_arch = "x86_64", not(amr_nb_portable)))]
+#[cfg(all(target_arch = "x86_64", not(portable)))]
 #[inline(always)]
 fn avx2() -> bool {
     std::arch::is_x86_feature_detected!("avx2")
 }
 
 /// The first of the given paths.
-#[cfg(all(target_arch = "x86_64", not(amr_nb_portable)))]
+#[cfg(all(target_arch = "x86_64", not(portable)))]
 macro_rules! first {
     ($p:path $(, $rest:path)*) => {
         $p
@@ -48,7 +48,7 @@ macro_rules! kernels {
         = $body:path $(, avx2 $avx:path)?;)*) => {$(
         $(#[$m])*
         $vis fn $name($($arg: $ty),*) $(-> $ret)? {
-            #[cfg(all(target_arch = "x86_64", not(amr_nb_portable)))]
+            #[cfg(all(target_arch = "x86_64", not(portable)))]
             if avx2() {
                 #[target_feature(enable = "avx2")]
                 fn avx2_copy($($arg: $ty),*) $(-> $ret)? {

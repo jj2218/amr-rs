@@ -337,7 +337,7 @@ fn rust_encoder_sync_is_bit_exact() {
 }
 
 /// The C oracle on the sync sequences: its frame-sync counts are pinned (opencore wraps on
-/// them, RESULTS.md); bit sync as amr-nb's.
+/// them: RESULTS.md defect 10); bit sync as amr-nb's.
 #[test]
 fn c_encoder_oracle_sync() {
     run_all_sync(

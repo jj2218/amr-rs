@@ -44,7 +44,7 @@ Measured, with the recipe that reproduces each number, in
 - **Faster than opencore-amr 0.1.6** compiled from source at `-O3`: decoder ≈3.06×
   (4.5 vs 13.6 µs per 20 ms frame), encoder ≈2.25× (24.2 vs 54.6 µs; per mode 2.08–2.39×).
   One pinned P-core of an i7-12700H (±5%), 2026-11-14; x86-64 baseline build with runtime AVX2
-  dispatch. Without the AVX2 paths (`--cfg amr_nb_portable`): decoder 3.02×, encoder 1.78×.
+  dispatch. Without the AVX2 paths (`--cfg portable`): decoder 3.02×, encoder 1.78×.
 - **Twelve defects found in the legacy C** (opencore-amr), each absent in this port, found by
   the vectors, differential tests, valgrind, inspection and fuzzing: no encoder/decoder homing;
   a `const` input buffer overwritten; an uninitialised read and two undefined-behaviour cases

@@ -8,6 +8,9 @@ license = "Apache-2.0"
 repository.workspace = true
 
 [features]
+# One library per codec: `nb` (AMR-NB codec), `wb` (AMR-WB decoder).
+nb = []
+wb = []
 # Fuzzing oracle: pin opencore's known undefined behaviour (RESULTS.md defects 3 and 4) to the
 # defined behaviour the Rust port implements (zeroed locals, wrapping signed arithmetic).
 pin-ub = []

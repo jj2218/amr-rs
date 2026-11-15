@@ -1,0 +1,13 @@
+amr-wb: a Rust port of the AMR-WB decoder from opencore-amr 0.1.6.
+
+This product includes software derived from opencore-amr
+(https://sourceforge.net/projects/opencore-amr/):
+  Copyright (C) 1998-2009 PacketVideo
+  Licensed under the Apache License, Version 2.0.
+
+Portions are derived from the following 3GPP standard:
+  3GPP TS 26.173, ANSI-C code for the Adaptive Multi-Rate - Wideband (AMR-WB) speech codec
+  (C) 2007, 3GPP Organizational Partners (ARIB, ATIS, CCSA, ETSI, TTA, TTC)
+  As stated in the opencore-amr sources: "Permission to distribute, modify and use this
+  file under the standard license terms listed above has been obtained from the copyright
+  holder."

@@ -13,10 +13,10 @@ repository = "https://github.com/jj2218/amr-rs"
 # Safe by default. Only the AVX2 dispatch (amr-nb src/simd.rs) and cfg(test) C oracles opt in.
 unsafe_code = "deny"
 missing_docs = "warn"
-# `--cfg amr_nb_portable` compiles out the AVX2 dispatch (crates/amr-nb/src/simd.rs);
+# `--cfg portable` compiles out every crate's AVX2 dispatch (`src/simd.rs`);
 # `--cfg amr_nb_arrays` runs the SSE2 kernels' array forms (the non-x86 bodies) on x86; `just test`.
 # `--cfg amr_nb_stages`: encoder stage timers (`BENCH=stages just bench`).
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(amr_nb_portable)", "cfg(amr_nb_arrays)", "cfg(amr_nb_stages)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(portable)", "cfg(amr_nb_arrays)", "cfg(amr_nb_stages)"] }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

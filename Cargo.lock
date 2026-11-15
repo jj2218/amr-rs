@@ -11,6 +11,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "amr-wb"
+version = "0.1.0"
+dependencies = [
+ "opencore-sys",
+ "ref26173-sys",
+]
+
+[[package]]
 name = "cc"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -35,6 +43,13 @@ dependencies = [
 
 [[package]]
 name = "ref26073-sys"
+version = "0.0.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "ref26173-sys"
 version = "0.0.0"
 dependencies = [
  "cc",
