@@ -619,8 +619,9 @@ impl Decoder {
 
     /// Decodes one frame. `bits` holds the frame's serial bits, one per element (0 or 1), in
     /// TS 26.173 parameter order: `mode.bits()` of them for speech frames, [`SID_BITS`] for
-    /// SID frames, none read for [`RxFrameType::NoData`] and [`RxFrameType::SpeechLost`]
-    /// (whose `mode` is ignored: the last one is used).
+    /// SID frames, none read for [`RxFrameType::NoData`] and [`RxFrameType::SpeechLost`].
+    /// `mode` is ignored for SID, NO_DATA and lost frames: the last speech frame's is used (as
+    /// the TS 26.173 reference does for `.awb` files; a SID's mode indication is not used).
     ///
     /// [`SID_BITS`]: crate::SID_BITS
     pub fn decode(
@@ -630,10 +631,18 @@ impl Decoder {
         bits: &[i16; MAX_SERIAL_SIZE],
         out: &mut [i16; L_FRAME16K],
     ) {
-        let mode = if matches!(frame_type, RxFrameType::NoData | RxFrameType::SpeechLost) {
+        use RxFrameType::*;
+        let mode = if matches!(frame_type, NoData | SpeechLost) {
             self.reset_flag = false;
             self.mode_old
         } else {
+            // SID frames: the previous mode, as the reference reads `.awb` and ITU files
+            // (`Read_serial`: `*mode = st->prev_mode`); their mode indication is ignored.
+            let mode = if matches!(frame_type, SidFirst | SidUpdate | SidBad) {
+                self.mode_old
+            } else {
+                mode
+            };
             self.mode_old = mode;
             if self.reset_flag_old {
                 self.reset_flag = dhf_test(bits, mode as usize, PRMNOFSF[mode as usize]);

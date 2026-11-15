@@ -101,3 +101,46 @@ fn no_data_mid_speech_is_the_one_difference() {
         "NO_DATA mid-speech must differ from the CR 0029 reference at or after the SID (got {d:?})"
     );
 }
+
+/// Sets `n` bits of `f` at `at` to `v` (MSB first), as the decoder reads parameters.
+fn set_parm(f: &mut Frame, at: usize, n: usize, v: u32) {
+    for k in 0..n {
+        let b = (v >> (n - 1 - k) & 1) as i16;
+        f.bits[at + k] = b;
+        f.prms[at + k] = if b != 0 { 127 } else { -127 };
+    }
+}
+
+/// Isf_isp reads `table[ind + 1]`; DTX can make ISF 14 exactly 16384 (CN_dithering's clamp),
+/// `ind` = 128 on a 129-entry table. Speech frames with the largest ISF 14 the 46-bit
+/// quantiser gives (16216) fill the DTX history; the SID_FIRST after them averages it, and the
+/// dither (on from the earlier SID_UPDATE) pushes it past 16384 within a few frames.
+#[test]
+fn dtx_isf_at_the_table_end() {
+    let cases = cases();
+    let case = cases
+        .iter()
+        .find(|c| c.name == "T_1265/T00_1265.cod")
+        .unwrap();
+    let speech = &case.frames[..60];
+    let mut frames: Vec<Frame> = speech[..10].to_vec();
+    let mut sid = speech[10].clone();
+    sid.frame_type = RxFrameType::SidFirst;
+    frames.push(sid.clone());
+    sid.frame_type = RxFrameType::SidUpdate;
+    set_parm(&mut sid, 34, 1, 1); // CN dithering on
+    frames.push(sid.clone());
+    let mut nd = sid.clone();
+    nd.frame_type = RxFrameType::NoData;
+    frames.extend(std::iter::repeat_n(nd.clone(), 5));
+    for f in &speech[12..52] {
+        let mut f = f.clone();
+        set_parm(&mut f, 1 + 8, 8, 208); // dico2_isf row with the largest ISF 14
+        set_parm(&mut f, 1 + 8 + 8 + 6 + 7 + 7 + 5, 5, 23); // dico25_isf, likewise
+        frames.push(f);
+    }
+    sid.frame_type = RxFrameType::SidFirst;
+    frames.push(sid);
+    frames.extend(std::iter::repeat_n(nd, 40));
+    assert_eq!(first_divergence(&frames), None);
+}

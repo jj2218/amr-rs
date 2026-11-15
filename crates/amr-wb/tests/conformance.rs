@@ -2,7 +2,7 @@
 //! the Rust decoder, and (proving the harness) the TS 26.173 reference and opencore.
 mod common;
 
-use amr_wb::{Decoder, L_FRAME16K, RxFrameType};
+use amr_wb::{Decoder, L_FRAME16K, RxFrameType, rfc4867};
 use common::{Case, cases};
 
 fn decode_rust(case: &Case) -> Vec<i16> {
@@ -86,6 +86,63 @@ fn run(label: &str, decode: impl Fn(&Case) -> Vec<i16>) -> Vec<String> {
 fn decoder_vectors() {
     let failing = run("amr-wb decoder", decode_rust);
     assert!(failing.is_empty(), "{} vectors differ", failing.len());
+}
+
+/// Every vector through an RFC 4867 `.awb` file: written, read back, decoded. Speech
+/// frames marked "probably degraded" have no packed form (none in the set: asserted).
+#[test]
+fn awb_files_decode_like_the_vectors() {
+    let decode_awb = |case: &Case| {
+        let frames: Vec<rfc4867::Frame> = case
+            .frames
+            .iter()
+            .map(|f| rfc4867::Frame {
+                frame_type: f.frame_type,
+                mode: f.mode,
+                bits: f.bits,
+            })
+            .collect();
+        let file = rfc4867::write_storage(&frames).expect("every vector frame is packable");
+        let mut dec = Decoder::new();
+        let mut out = Vec::with_capacity(frames.len() * L_FRAME16K);
+        let mut pcm = [0i16; L_FRAME16K];
+        let mut n = 0;
+        for f in rfc4867::read_storage(&file).unwrap() {
+            let f = f.unwrap();
+            dec.decode(f.frame_type, f.mode, &f.bits, &mut pcm);
+            out.extend_from_slice(&pcm);
+            n += 1;
+        }
+        assert_eq!(n, frames.len(), "{}", case.name);
+        out
+    };
+    let failing = run("amr-wb via .awb (RFC 4867)", decode_awb);
+    assert!(failing.is_empty(), "{} vectors differ", failing.len());
+}
+
+/// A SID frame's mode is ignored (the previous mode is used, as the reference reads `.awb`
+/// files): the DTX vectors decode unchanged with every SID frame's mode rotated.
+#[test]
+fn sid_mode_is_ignored() {
+    let mut sids = 0;
+    for mut case in cases().into_iter().filter(|c| c.name.contains("Dtx")) {
+        for f in &mut case.frames {
+            if matches!(
+                f.frame_type,
+                RxFrameType::SidFirst | RxFrameType::SidUpdate | RxFrameType::SidBad
+            ) {
+                f.mode = amr_wb::Mode::from_index((f.mode as usize + 4) % 9).unwrap();
+                sids += 1;
+            }
+        }
+        assert_eq!(
+            first_diff(&decode_rust(&case), &case.expected),
+            None,
+            "{}",
+            case.name
+        );
+    }
+    assert!(sids > 100, "only {sids} SID frames");
 }
 
 /// The harness itself: the reference must reproduce every vector. opencore's count is

@@ -1,16 +1,19 @@
 # amr-wb
 
-Pure-Rust, bit-exact AMR-WB (3GPP TS 26.173, ITU-T G.722.2) speech decoder. No `unsafe`, no
+Pure-Rust, bit-exact AMR-WB (3GPP TS 26.173, ITU-T G.722.2) speech decoder, with RFC 4867
+packing (`.awb` files, RTP payloads octet-aligned and bandwidth-efficient). No `unsafe`, no
 dependencies. Ported from opencore-amr 0.1.6 (Apache-2.0) and corrected to the specification
 wherever opencore differs from it.
 
 ```rust
-use amr_wb::{Decoder, Mode, RxFrameType, L_FRAME16K, MAX_SERIAL_SIZE};
+use amr_wb::{Decoder, L_FRAME16K, rfc4867};
 
 let mut dec = Decoder::new();
-let bits = [0i16; MAX_SERIAL_SIZE]; // one frame's serial bits, 0 or 1 each
-let mut pcm = [0i16; L_FRAME16K];   // 20 ms at 16 kHz
-dec.decode(RxFrameType::SpeechGood, Mode::MD1265, &bits, &mut pcm);
+let mut pcm = [0i16; L_FRAME16K]; // 20 ms at 16 kHz
+for frame in rfc4867::read_storage(&std::fs::read("speech.awb")?)? {
+    let f = frame?; // frames before a damaged one are still delivered
+    dec.decode(f.frame_type, f.mode, &f.bits, &mut pcm);
+}
 ```
 
 ## Results
@@ -22,10 +25,14 @@ Measured, with the recipe that reproduces each number, in
 - **Differentially tested against the TS 26.173 reference C**: the whole decoder on 1,600
   stress streams (corrupted and random bits, bad, lost and degraded frames, SID and NO_DATA
   sequences, mode switching), and its filters and operators one by one, bit-exact.
+- **`.awb` files**: every vector, packed per RFC 4867 and read back, decodes bit-exactly;
+  the reader agrees with the TS 26.173 reference's on 20,000 random frames.
 - **≈1.25× the speed of opencore-amr's C decoder** (-O3), scalar code.
-- **Nine defects of opencore's decoder fixed** (saturation, rounding, shift counts, the
+- **Fuzzed against the TS 26.173 reference** (1 h, the decoder on arbitrary frames).
+- **Ten defects of opencore's decoder fixed** (saturation, rounding, shift counts, the
   synthesis filters' scaling for comfort noise, concealment gains, comfort-noise muting): see
-  the results page.
+  the results page. One more, an out-of-bounds table read shared with the reference C, would
+  be a panic in Rust and is handled exactly.
 
 **One deliberate difference from TS 26.173:** NO_DATA frames are handled as before
 CR 26.173-0027..29 (2007), as opencore does. A NO_DATA frame during speech starts the

@@ -6,6 +6,7 @@
 
 use crate::basic_op::*;
 use crate::excitation::pred_lt4;
+use crate::lpc::isf_isp;
 use crate::synthesis::*;
 use crate::testutil::{Rng, with_ref};
 
@@ -18,6 +19,7 @@ unsafe extern "C" {
     fn refwb_norm_s(a: i16) -> i16;
     fn refwb_norm_l(a: i32) -> i16;
     fn refwb_Pow2(exponant: i16, fraction: i16) -> i32;
+    fn refwb_Isf_isp(isf: *mut i16, isp: *mut i16, m: i16);
     fn refwb_Pred_lt4(exc: *mut i16, t0: i16, frac: i16, l_subfr: i16);
     fn refwb_Syn_filt_32(
         a: *mut i16,
@@ -237,5 +239,27 @@ fn filters_match_reference_over_sequences() {
                 }
             });
         }
+    }
+}
+
+/// Every ISF in [0, 16384) (the last one, doubled, in [0, 8192)). At 16384 the C reads
+/// `table[129]`, past its table (undefined, so not called here): there the value is
+/// `table[128]` (`lpc::isf_to_cos`), checked directly.
+#[test]
+fn isf_isp_matches_reference_on_its_whole_domain() {
+    let mut isp = [0i16; 16];
+    let mut top = [16384; 16];
+    top[15] = 8192; // doubled
+    isf_isp(&top, &mut isp);
+    assert_eq!(isp, [crate::tables::TABLE[128]; 16]);
+    for base in (0..16384i32).step_by(15) {
+        let mut isf: [i16; 16] = std::array::from_fn(|i| (base + i as i32).min(16383) as i16);
+        isf[15] = (base / 2) as i16;
+        let mut isp = [0i16; 16];
+        isf_isp(&isf, &mut isp);
+        let mut c = [0i16; 16];
+        // SAFETY: 16 ISFs in, 16 ISPs out (the table read at 16384 is the C's own, see above).
+        with_ref(|| unsafe { refwb_Isf_isp(isf.as_mut_ptr(), c.as_mut_ptr(), 16) });
+        assert_eq!(isp, c, "Isf_isp from {base}");
     }
 }

@@ -55,8 +55,9 @@ pub fn clear_overflow() {
     unsafe { refwb_Overflow = 0 }
 }
 
-/// The reference decoder's frame loop (`decoder.c` `main`): NO_DATA/lost frames keep the
-/// last mode, homing per TS 26.173, the 2 LSBs cleared (14-bit output).
+/// The reference decoder's frame loop (`decoder.c` `main`) as it runs on `.awb` (MIME) and
+/// ITU input: SID, NO_DATA and lost frames take the last mode (`Read_serial`'s `prev_mode`),
+/// homing per TS 26.173, the 2 LSBs cleared (14-bit output).
 pub struct Decoder {
     st: *mut c_void,
     mode_old: i16,
@@ -67,6 +68,9 @@ pub struct Decoder {
 /// `RX_NO_DATA` and `RX_SPEECH_LOST` (`dtx.h`): frames without a mode of their own.
 const RX_SPEECH_LOST: i16 = 2;
 const RX_NO_DATA: i16 = 7;
+/// `RX_SID_FIRST`..=`RX_SID_BAD`.
+const RX_SID_FIRST: i16 = 4;
+const RX_SID_BAD: i16 = 6;
 
 impl Decoder {
     pub fn new() -> Self {
@@ -99,6 +103,9 @@ impl Decoder {
                 mode = self.mode_old;
                 self.reset_flag = 0;
             } else {
+                if (RX_SID_FIRST..=RX_SID_BAD).contains(&frame_type) {
+                    mode = self.mode_old; // Read_serial: `*mode = st->prev_mode`
+                }
                 self.mode_old = mode;
                 if self.reset_flag_old == 1 {
                     self.reset_flag = refwb_decoder_homing_frame_test_first(p, mode);

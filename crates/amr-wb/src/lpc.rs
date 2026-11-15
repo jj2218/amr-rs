@@ -155,10 +155,21 @@ pub(crate) fn isf_isp(isf: &[i16], isp: &mut [i16]) {
 }
 
 /// The second half of `Isf_isp`, in place (the cosine table lookup).
+///
+/// The C reads `table[ind + 1]` with `ind = isf >> 7`: past the 129-entry table at 16384,
+/// which comfort noise reaches (`CN_dithering` clamps ISF 14 to 16384), there times offset 0.
+/// Here `ind` ≤ 127 and `offset` ≤ 128: the same value at 16384 (`table[127]` + the full
+/// step), unchanged below. Values outside [0, 16384] (undefined in the C, never seen) are
+/// clamped in release builds and fail the debug assertion (tests, fuzzing).
 fn isf_to_cos(isp: &mut [i16]) {
     for v in isp.iter_mut() {
-        let ind = (*v >> 7) as usize;
-        let offset = *v & 0x007f;
+        debug_assert!(
+            (0..=16384).contains(v),
+            "ISF/ISP {v} outside the table's domain"
+        );
+        let x = (*v).clamp(0, 16384);
+        let ind = ((x >> 7) as usize).min(127);
+        let offset = x - ((ind as i16) << 7);
         let l = mul_16by16_to_int32(TABLE[ind + 1] - TABLE[ind], offset);
         *v = add_int16(TABLE[ind], (l >> 8) as i16);
     }

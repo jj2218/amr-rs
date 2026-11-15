@@ -1,5 +1,5 @@
 [package]
-name = "amr-nb-fuzz"
+name = "amr-fuzz"
 version = "0.0.0"
 description = "cargo-fuzz targets (nightly, `just fuzz` only; not part of the stable workspace)"
 publish = false
@@ -13,6 +13,8 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 amr-nb = { path = "../crates/amr-nb" }
 ref26073-sys = { path = "../crates/ref26073-sys" }
+amr-wb = { path = "../crates/amr-wb" }
+ref26173-sys = { path = "../crates/ref26173-sys" }
 
 # Its own workspace: kept out of the stable one (`just check`, CI).
 [workspace]
@@ -34,6 +36,20 @@ bench = false
 [[bin]]
 name = "encode_vs_ref"
 path = "fuzz_targets/encode_vs_ref.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wb_decode_vs_ref"
+path = "fuzz_targets/wb_decode_vs_ref.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wb_rfc4867"
+path = "fuzz_targets/wb_rfc4867.rs"
 test = false
 doc = false
 bench = false

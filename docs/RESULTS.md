@@ -242,7 +242,40 @@ download, symbols prefixed `refwb_`).
 - **Kernels**: the basic operators and `Pow2`, `Pred_lt4`, `Syn_filt_32`, `Syn_filt` (both
   orders), and over 40-call sequences `HP50_12k8`, `HP400_12k8`, `Oversamp_16k`, `Filt_6k_7k`,
   `Filt_7k`, `Deemph_32` (outputs and memories). Each exact fast path (below) has an input class
-  that drives its guard false; forcing each guard true fails these tests.
+  that drives its guard false; forcing each guard true fails these tests. `Isf_isp` on every
+  ISF of its domain [0, 16384] (defect 11).
+- **Extreme states**: a crafted stream (speech with the largest ISF 14 the quantiser gives,
+  then comfort noise with dithering) drives ISF 14 to 16384, the table's end (defect 11):
+  bit-exact (`dtx_isf_at_the_table_end`; it panicked before the fix).
+
+### Packed formats, RFC 4867 (`cargo test --release -p amr-wb rfc4867`)
+`.awb` storage and RTP payloads (octet-aligned, bandwidth-efficient; single channel, no
+interleaving/CRC/robust sorting): `amr-wb::rfc4867`. Oracles, all green:
+- **Every vector through `.awb`**: the 221 TS 26.174 decoder cases packed, read back and
+  decoded: **221/221 bit-exact** (`awb_files_decode_like_the_vectors`).
+- **Against the TS 26.173 reference's file reader** (`Read_serial`, its `decoder -mime`): it
+  reads what we write (every mode × good/bad, SID first/update/bad × 9 mode indications,
+  SPEECH_LOST, NO_DATA), and both readers agree on 20,000 random frames (every frame type,
+  random Q, padding and mode indications).
+- **A SID frame's mode indication is not used**: the decoder takes the previous mode for SID
+  frames, as the reference's `.awb` and ITU readers do (`prev_mode`), so a corrupted
+  indication can't change the output. The vectors (whose own format carries a mode per SID
+  frame) still decode 221/221, also with every SID frame's mode rotated (`sid_mode_is_ignored`;
+  it fails if the decoder uses the SID's mode).
+- **Round trip** in both RTP packings (1–4 frames per packet), sizes vs opencore's tables,
+  header layouts worked out by hand from the RFC, every truncation/reserved-FT error path.
+  Frame types 10–13 (reserved, size unknown) end a file and discard an RTP packet.
+
+### Fuzzing (`just fuzz wb_<target> [seconds]`)
+As amr-nb's (nightly-2026-11-01, ASan on the Rust side), 2026-11-15.
+
+| target | checks | runs | cov | findings |
+|---|---|---:|---:|---|
+| `wb_decode_vs_ref` | Rust decoder vs the TS 26.173 reference's frame loop (`ref26173-sys`, homing included), PCM equal frame by frame: every RX frame type, mode and bits; NO_DATA only in DTX (the one difference, kept out; without that rule it fails in ~20 s) | 1,235,729 (1 h) | 2,120 | none |
+| `wb_rfc4867` | `.awb`, RTP octet-aligned and bandwidth-efficient readers on arbitrary bytes: no panics, accepted frames round-trip through both packings, canonical form never longer | 589,309 (120 s) | 494 | none |
+
+The fuzzer did not reach defect 11 (an extreme state: a history of maximal ISFs, then
+dithered comfort noise); a bound per table lookup over the generated tables did.
 
 ### Decoder speed (`CRATE=amr-wb just bench`)
 µs per 20 ms frame, best of 15, same machine and builds as amr-nb's tables, on the
@@ -294,3 +327,11 @@ then a plain dot product runs, with the specification's chain as the fallback.
    specification lets it go negative.
 9. **No CR 0026**: in DTX_MUTE right after a SID update opencore divides by zero
    (`div_16by16(1024, 0)` returns 0 there), and a late SID_UPDATE mutes.
+10. **The quality bit is ignored**: `D_IF_decode` sets `quality = 1` (as its AMR-NB
+   interface, amr-nb's defect 7), so frames marked damaged (Q = 0) decode like good ones instead
+   of being concealed (pinned: `opencore_ignores_the_quality_bit`).
+11. **`Isf_isp` reads past its cosine table** (also the TS 26.173 reference): at ISF 16384 it
+   reads `table[129]` of 129 entries, times offset 0, so the value is right but the read is
+   out of bounds; in Rust it panicked (index out of bounds). Comfort noise reaches it: after a
+   SID_FIRST averages a history of maximal speech ISFs, the dithering pushes ISF 14 past
+   16384 and clamps it there. Now indexed exactly (`ind ≤ 127`, `offset ≤ 128`, same value).

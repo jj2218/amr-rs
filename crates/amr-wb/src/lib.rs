@@ -1,11 +1,13 @@
-//! Pure-Rust, bit-exact AMR-WB (3GPP TS 26.173, ITU-T G.722.2) speech decoder.
+//! Pure-Rust, bit-exact AMR-WB (3GPP TS 26.173, ITU-T G.722.2) speech decoder, with RFC 4867
+//! packing (`.awb` files and RTP payloads).
 //!
 //! Bit-exact on the official 3GPP TS 26.174 decoder test vectors and differentially tested
 //! against the TS 26.173 reference C. Ported from opencore-amr 0.1.6 (Apache-2.0); see NOTICE.
 //!
 //! Audio is 16 kHz, 16-bit mono PCM in frames of 320 samples (20 ms), 14-bit as the reference
 //! decoder outputs it. The [`Decoder`] turns one frame of serial bits (TS 26.173 parameter
-//! order, one bit per `i16`) into PCM.
+//! order, one bit per `i16`) into PCM; [`rfc4867`] reads such frames from bytes (and writes
+//! them).
 //!
 //! **One deliberate difference from TS 26.173:** NO_DATA frames are handled as before CR
 //! 26.173-0027..29 (2007), as opencore does: a NO_DATA frame during speech starts the
@@ -21,6 +23,7 @@ mod dtx;
 mod excitation;
 mod gain;
 mod lpc;
+pub mod rfc4867;
 mod synthesis;
 mod tables;
 #[cfg(test)]

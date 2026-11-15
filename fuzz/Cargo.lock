@@ -3,17 +3,23 @@
 version = 4
 
 [[package]]
+name = "amr-fuzz"
+version = "0.0.0"
+dependencies = [
+ "amr-nb",
+ "amr-wb",
+ "libfuzzer-sys",
+ "ref26073-sys",
+ "ref26173-sys",
+]
+
+[[package]]
 name = "amr-nb"
 version = "0.1.1"
 
 [[package]]
-name = "amr-nb-fuzz"
-version = "0.0.0"
-dependencies = [
- "amr-nb",
- "libfuzzer-sys",
- "ref26073-sys",
-]
+name = "amr-wb"
+version = "0.1.1"
 
 [[package]]
 name = "arbitrary"
@@ -90,6 +96,13 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "ref26073-sys"
+version = "0.0.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "ref26173-sys"
 version = "0.0.0"
 dependencies = [
  "cc",
