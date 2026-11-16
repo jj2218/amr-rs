@@ -34,6 +34,7 @@ pub(crate) const NBBITS_14K: i16 = 285;
 pub(crate) const NBBITS_16K: i16 = 317;
 pub(crate) const NBBITS_18K: i16 = 365;
 pub(crate) const NBBITS_20K: i16 = 397;
+pub(crate) const NBBITS_23K: i16 = 461;
 pub(crate) const NBBITS_24K: i16 = 477;
 
 /// Samples per 20 ms output frame (16 kHz).

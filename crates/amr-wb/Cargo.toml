@@ -1,7 +1,7 @@
 [package]
 name = "amr-wb"
-version = "0.1.1"
-description = "Pure-Rust, bit-exact AMR-WB (3GPP TS 26.173, ITU-T G.722.2) speech decoder"
+version = "0.2.0"
+description = "Pure-Rust, bit-exact AMR-WB (3GPP TS 26.173, ITU-T G.722.2) speech decoder and encoder"
 keywords = ["amr-wb", "speech", "codec", "audio", "3gpp"]
 categories = ["multimedia::audio", "multimedia::encoding", "encoding"]
 readme = "README.md"
@@ -16,7 +16,7 @@ repository.workspace = true
 workspace = true
 
 [dev-dependencies]
-opencore-sys = { path = "../opencore-sys", features = ["wb"] }
+opencore-sys = { path = "../opencore-sys", features = ["wb", "wbenc"] }
 ref26173-sys = { path = "../ref26173-sys" }
 
 [[bench]]

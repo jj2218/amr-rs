@@ -30,8 +30,12 @@ pub struct Case {
     pub expected: Vec<i16>,
 }
 
-/// `.cache/3gpp/ts26174` of this checkout, or of the main checkout when run from a worktree.
+/// `.cache/3gpp/ts26174` of this checkout, or of the main checkout when run from a worktree;
+/// `TS26174_DIR` overrides it (an older vector version, unpacked alike, to attribute a CR).
 pub fn vectors_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("TS26174_DIR") {
+        return PathBuf::from(d);
+    }
     let ws = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let local = ws.join(".cache/3gpp/ts26174");
     if local.join(".unpacked").exists() {
@@ -143,4 +147,128 @@ pub fn cases() -> Vec<Case> {
         .collect();
     assert_eq!(cases.len(), DECODER_CASES, "decoder vector count");
     cases
+}
+
+/// Mode directory suffixes in mode order (`T_660` .. `T_2385`).
+pub const MODE_NAMES: [&str; 9] = [
+    "660", "885", "1265", "1425", "1585", "1825", "1985", "2305", "2385",
+];
+
+/// One `.inp` → `.cod` encoder conformance case.
+#[derive(Clone)]
+pub struct EncCase {
+    pub name: String,
+    pub input: Vec<i16>,
+    /// The mode per frame (the last one repeats, as the reference's mode file reader does).
+    pub modes: Vec<u8>,
+    pub dtx: bool,
+    /// Frame sync: `expected` is the 2nd output frame after the last decoder homing frame.
+    pub sync: bool,
+    /// The `.cod` words: per frame 0x6b21, TX frame type, mode, one ±127 word per bit.
+    pub expected: Vec<i16>,
+}
+
+impl EncCase {
+    pub fn mode(&self, frame: usize) -> u8 {
+        self.modes[frame.min(self.modes.len() - 1)]
+    }
+}
+
+/// Encoder cases in the SHA-pinned TS 26.174 set (j00): the 221 decoder `.cod` files (T00..T23
+/// per mode but T22, T22 mode switching, Dtx1..Dtx5) and 320 frame-sync streams per mode.
+pub const ENCODER_CASES: usize = 221 + 320 * 9;
+
+/// The `.inp` (and mode list) for a `.cod` path relative to `T/`.
+fn enc_case(root: &Path, rel: &Path) -> EncCase {
+    let stem = rel.file_stem().unwrap().to_str().unwrap();
+    let dir = rel.parent().unwrap();
+    let dtx = dir.starts_with("DTX_test_vectors");
+    let (input, modes) = if stem == "T22" {
+        let m = std::fs::read_to_string(root.join("T_inp/T22.mod")).unwrap();
+        (
+            root.join("T_inp/T22.inp"),
+            m.split_whitespace().map(|v| v.parse().unwrap()).collect(),
+        )
+    } else {
+        let (seq, mode) = stem.split_once('_').unwrap();
+        let mode = MODE_NAMES.iter().position(|&n| n == mode).unwrap() as u8;
+        let inp = dir
+            .parent()
+            .unwrap()
+            .join("T_inp")
+            .join(format!("{seq}.inp"));
+        (root.join(inp), vec![mode])
+    };
+    EncCase {
+        name: rel.display().to_string(),
+        input: read_i16(&input),
+        modes,
+        dtx,
+        sync: false,
+        expected: read_i16(&root.join(rel)),
+    }
+}
+
+/// All encoder cases, sorted by name: `T/**/*.cod` with an input, then `S/Sync_<mode>`
+/// (`syncNNN`: `seqsync.inp`, homing frames then speech, delayed by NNN zero samples).
+pub fn enc_cases() -> Vec<EncCase> {
+    let root = vectors_dir().join("T");
+    let mut cods = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("cod")) {
+                cods.push(p.strip_prefix(&root).unwrap().to_path_buf());
+            }
+        }
+    }
+    cods.sort();
+    let mut cases: Vec<EncCase> = cods.iter().map(|r| enc_case(&root, r)).collect();
+    let s = vectors_dir().join("S");
+    let seq = read_i16(&s.join("Sync_inp/seqsync.inp"));
+    for (m, name) in MODE_NAMES.iter().enumerate() {
+        for k in 0..320 {
+            let rel = format!("Sync_{name}/sync{k:03}_{name}.cod");
+            let mut input = vec![0; k];
+            input.extend_from_slice(&seq);
+            input.resize(input.len().div_ceil(320) * 320, 0);
+            cases.push(EncCase {
+                name: rel.clone(),
+                input,
+                modes: vec![m as u8],
+                dtx: false,
+                sync: true,
+                expected: read_i16(&s.join(&rel)),
+            });
+        }
+    }
+    assert_eq!(cases.len(), ENCODER_CASES, "encoder vector count");
+    cases
+}
+
+/// `S/Sync_inp/bitsync.inp`: bit-shifted homing-frame triplets (3 frames each).
+pub fn read_bitsync() -> Vec<i16> {
+    let w = read_i16(&vectors_dir().join("S/Sync_inp/bitsync.inp"));
+    assert_eq!(w.len() % 960, 0, "bitsync.inp: whole triplets");
+    w
+}
+
+/// An encoder frame as a `.cod` vector stores it (the reference's default format): 0x6b21, the
+/// TX frame type (`TX_*`), the requested mode, then one ±127 word per bit (a SID's bits, also
+/// for SID_FIRST and NO_DATA frames, as the reference writes them).
+#[allow(dead_code)] // not every test binary encodes
+pub fn cod_words(f: &amr_wb::rfc4867::Frame) -> Vec<i16> {
+    let (tx, n) = match f.frame_type {
+        RxFrameType::SpeechGood => (0, f.mode.bits()),
+        RxFrameType::SidFirst => (1, amr_wb::SID_BITS),
+        RxFrameType::SidUpdate => (2, amr_wb::SID_BITS),
+        RxFrameType::NoData => (3, amr_wb::SID_BITS),
+        t => panic!("not an encoder frame type: {t:?}"),
+    };
+    let mut w = vec![0x6b21, tx, f.mode as i16];
+    w.extend(f.bits[..n].iter().map(|&b| if b != 0 { 127 } else { -127 }));
+    w
 }

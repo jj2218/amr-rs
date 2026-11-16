@@ -5,7 +5,7 @@ Pure-Rust AMR speech codecs, bit-exact against the 3GPP specifications.
 | crate | |
 |---|---|
 | [`amr-nb`](crates/amr-nb) | AMR-NB (3GPP TS 26.073): encoder, decoder, DTX, RFC 4867 packing. Bit-exact on the whole TS 26.074 vector set; decoder ≈3.06×, encoder ≈2.25× the speed of opencore-amr's C. [README](crates/amr-nb/README.md) |
-| [`amr-wb`](crates/amr-wb) | AMR-WB (3GPP TS 26.173, ITU-T G.722.2): decoder. Bit-exact on the whole TS 26.174 decoder set and against the TS 26.173 reference; ≈1.25× the speed of opencore-amr's C. [README](crates/amr-wb/README.md) |
+| [`amr-wb`](crates/amr-wb) | AMR-WB (3GPP TS 26.173, ITU-T G.722.2): decoder, encoder, DTX, RFC 4867 packing. Bit-exact on the whole TS 26.174 vector set and against the TS 26.173 reference; decoder ≈2× the speed of opencore-amr's C, encoder (not yet tuned) ≈0.46× vo-amrwbenc's. [README](crates/amr-wb/README.md) |
 | `opencore-sys`, `ref26073-sys`, `ref26173-sys` | test-only (not published): the C oracles, compiled from pinned downloads |
 
 Measured results, each with the command that reproduces it: [`docs/RESULTS.md`](docs/RESULTS.md).

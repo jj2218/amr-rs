@@ -1,14 +1,15 @@
-//! Decoder speed: Rust vs opencore (C, -O3) on the 3GPP TS 26.174 single-mode vectors
-//! (`T_<mode>/T00..T20`), per mode. Both run the same frame loop (homing test, decode, 14-bit
-//! output) on pre-parsed serial bits. Run via `CRATE=amr-wb just bench` (pins one core).
-//! Prints µs/frame (best of BENCH_REPS, default 15) and the speedup; `BENCH_MODE=<mode>`
-//! (e.g. 1265) runs one mode. `BENCH=enc` has nothing to run (no encoder yet).
+//! Codec speed on the 3GPP TS 26.174 single-mode vectors (`T_<mode>/T00..T20`), per mode.
+//! Decoder: Rust vs opencore (C, -O3), both the same frame loop (homing test, decode, 14-bit
+//! output) on pre-parsed serial bits. `BENCH=enc`: encoder, Rust vs vo-amrwbenc (C, -O3) on
+//! the vectors' input PCM. Run via `CRATE=amr-wb just bench` (pins one core). Prints µs/frame
+//! (best of BENCH_REPS, default 15) and the speedup; `BENCH_MODE=<mode>` (e.g. 1265) runs one
+//! mode.
 #![allow(unsafe_code)] // FFI to the C baseline
 
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use amr_wb::{Decoder, L_FRAME16K};
+use amr_wb::{Decoder, Encoder, L_FRAME16K, Mode};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -54,10 +55,18 @@ fn main() {
         std::process::exit(2);
     }
     if std::env::var("BENCH").as_deref() == Ok("enc") {
-        println!("amr-wb: no encoder to benchmark");
+        encoder();
         return;
     }
     let cases = common::cases();
+    #[cfg(codec_stages)]
+    println!(
+        "stages dec  {}",
+        amr_wb::stages::NAMES
+            .iter()
+            .map(|n| format!(" {n:>11}"))
+            .collect::<String>()
+    );
     println!("decoder {:>9} {:>10} {:>8}", "rust µs", "c µs", "speedup");
     let (mut tr, mut tc, mut tn) = (0.0, 0.0, 0usize);
     for name in MODES.iter().filter(|n| wanted(n)) {
@@ -65,6 +74,8 @@ fn main() {
         let mut set: Vec<_> = cases.iter().filter(|c| c.name.starts_with(&dir)).collect();
         set.retain(|c| !c.name.contains("Dtx"));
         let frames: usize = set.iter().map(|c| c.frames.len()).sum();
+        #[cfg(codec_stages)]
+        amr_wb::stages::take();
         let rust = best(|| {
             for c in &set {
                 let mut d = Decoder::new();
@@ -75,6 +86,18 @@ fn main() {
                 }
             }
         });
+        // `--cfg codec_stages` (`BENCH=stages`): µs per frame per stage (mean of all reps)
+        #[cfg(codec_stages)]
+        {
+            let ns = amr_wb::stages::take();
+            let per = (frames * reps()) as f64 * 1e3;
+            let cols: String = ns
+                .iter()
+                .map(|&v| format!(" {:>11.2}", v as f64 / per))
+                .collect();
+            println!("stages {name:<4}{cols}");
+            continue;
+        }
         // the C reads prms without writing them: one copy outside the timing
         let mut prms: Vec<Vec<_>> = set
             .iter()
@@ -97,6 +120,57 @@ fn main() {
                         black_box(&pcm);
                     }
                     opencore_sys::oc_wb_exit(st);
+                }
+            }
+        });
+        row(name, rust, c, frames);
+        (tr, tc, tn) = (tr + rust, tc + c, tn + frames);
+    }
+    if std::env::var("BENCH_MODE").is_err() {
+        row("all", tr, tc, tn);
+    }
+}
+
+/// `BENCH=enc`: the encoders on the single-mode vectors' input PCM (T00..T20, no DTX), Rust vs
+/// vo-amrwbenc, both through their frame loops (homing test, 14-bit input, serial output).
+fn encoder() {
+    let cases = common::enc_cases();
+    println!("encoder {:>9} {:>10} {:>8}", "rust µs", "c µs", "speedup");
+    let (mut tr, mut tc, mut tn) = (0.0, 0.0, 0usize);
+    for (m, name) in MODES.iter().enumerate().filter(|(_, n)| wanted(n)) {
+        let dir = format!("T_{name}/");
+        let set: Vec<_> = cases
+            .iter()
+            .filter(|c| c.name.starts_with(&dir) && !c.dtx && !c.sync)
+            .collect();
+        let frames: usize = set.iter().map(|c| c.input.len() / L_FRAME16K).sum();
+        let mode = Mode::from_index(m).unwrap();
+        let rust = best(|| {
+            for c in &set {
+                let mut e = Encoder::new(false);
+                for f in c.input.as_chunks::<L_FRAME16K>().0 {
+                    black_box(e.encode(mode, f));
+                }
+            }
+        });
+        let c = best(|| {
+            for c in &set {
+                // SAFETY: the shim allocates its state, copies the 320 samples, writes at
+                // most 480 words.
+                unsafe {
+                    let st = opencore_sys::vo_wbenc_init();
+                    let mut out = [0i16; 480];
+                    for f in c.input.as_chunks::<L_FRAME16K>().0 {
+                        black_box(opencore_sys::vo_wbenc_encode(
+                            st,
+                            m as i32,
+                            0,
+                            f.as_ptr(),
+                            out.as_mut_ptr(),
+                        ));
+                        black_box(&out);
+                    }
+                    opencore_sys::vo_wbenc_exit(st);
                 }
             }
         });

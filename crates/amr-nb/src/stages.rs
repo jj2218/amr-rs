@@ -1,5 +1,5 @@
 //! Encoder and decoder stage timers for time attribution (callgrind counts instructions, `perf` is not
-//! available): `--cfg amr_nb_stages` (`BENCH=stages just bench`) times the stretch since the
+//! available): `--cfg codec_stages` (`BENCH=stages just bench`) times the stretch since the
 //! previous mark and adds it to the stage being marked; otherwise every call is a no-op.
 
 /// Stage indices, in frame order (`mark` after each stage).
@@ -38,7 +38,7 @@ pub const NAMES: [&str; 9] = [
     "tail",
 ];
 
-#[cfg(amr_nb_stages)]
+#[cfg(codec_stages)]
 mod imp {
     use std::cell::Cell;
     use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -65,7 +65,7 @@ mod imp {
     }
 }
 
-#[cfg(not(amr_nb_stages))]
+#[cfg(not(codec_stages))]
 mod imp {
     #[inline(always)]
     pub(crate) fn start() {}
@@ -73,6 +73,6 @@ mod imp {
     pub(crate) fn mark(_: usize) {}
 }
 
-#[cfg(amr_nb_stages)]
+#[cfg(codec_stages)]
 pub use imp::take;
 pub(crate) use imp::{mark, start};

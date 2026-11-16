@@ -52,11 +52,11 @@ mod gains;
 mod lpc;
 mod post;
 mod simd;
-// Stage timers: public only in `--cfg amr_nb_stages` builds (`BENCH=stages just bench`).
-#[cfg(amr_nb_stages)]
+// Stage timers: public only in `--cfg codec_stages` builds (`BENCH=stages just bench`).
+#[cfg(codec_stages)]
 #[doc(hidden)]
 pub mod stages;
-#[cfg(not(amr_nb_stages))]
+#[cfg(not(codec_stages))]
 #[allow(dead_code)] // the names and `take` are read only by the stages bench
 mod stages;
 mod tables;

@@ -1,7 +1,8 @@
 # Results
 
-Measured results of amr-nb (the sections below) and amr-wb ([its own section](#amr-wb-amr-wb-decoder)
-at the end). Every number is reproducible with the recipe or command in its heading; the
+Measured results of amr-nb (the sections below) and amr-wb (its
+[decoder](#amr-wb-amr-wb-decoder) and [encoder](#amr-wb-encoder-amr-wb-ts-26190) at the end).
+Every number is reproducible with the recipe or command in its heading; the
 oracles (3GPP vectors and reference C, opencore-amr) are downloaded and verified on first use
 (see the README).
 
@@ -257,6 +258,10 @@ interleaving/CRC/robust sorting): `amr-wb::rfc4867`. Oracles, all green:
   reads what we write (every mode × good/bad, SID first/update/bad × 9 mode indications,
   SPEECH_LOST, NO_DATA), and both readers agree on 20,000 random frames (every frame type,
   random Q, padding and mode indications).
+- **Against the reference's file writer** (`Write_serial`, its `coder -mime`): 600 encoder
+  frames (speech with pauses, DTX on, every mode) written by us and by the reference coder +
+  writer are byte-equal (`awb_matches_the_reference_writer`). A SID_FIRST frame's 35
+  comfort-noise bits are sent as zeros, as there (10 such frames carry non-zero analysis bits).
 - **A SID frame's mode indication is not used**: the decoder takes the previous mode for SID
   frames, as the reference's `.awb` and ITU readers do (`prev_mode`), so a corrupted
   indication can't change the output. The vectors (whose own format carries a mode per SID
@@ -284,22 +289,25 @@ decode, 14-bit output) on pre-parsed serial bits.
 
 | mode | Rust | C | speedup |
 |---|---:|---:|---:|
-| 6.60 | 27.5 | 32.9 | 1.20× |
-| 8.85 | 24.7 | 31.2 | 1.27× |
-| 12.65 | 23.5 | 28.7 | 1.22× |
-| 14.25 | 23.5 | 29.0 | 1.24× |
-| 15.85 | 23.4 | 29.5 | 1.26× |
-| 18.25 | 23.9 | 30.1 | 1.26× |
-| 19.85 | 23.8 | 30.5 | 1.28× |
-| 23.05 | 24.1 | 31.3 | 1.30× |
-| 23.85 | 27.1 | 34.7 | 1.28× |
-| **all** | **24.6** | **30.9** | **≈1.25×** |
+| 6.60 | 19.3 | 35.5 | 1.85× |
+| 8.85 | 16.4 | 33.6 | 2.04× |
+| 12.65 | 15.6 | 30.9 | 1.98× |
+| 14.25 | 15.6 | 31.2 | 2.00× |
+| 15.85 | 15.6 | 31.8 | 2.03× |
+| 18.25 | 16.1 | 32.7 | 2.03× |
+| 19.85 | 16.1 | 33.1 | 2.05× |
+| 23.05 | 16.4 | 34.2 | 2.08× |
+| 23.85 | 18.0 | 37.7 | 2.09× |
+| **all** | **16.6** | **33.4** | **≈2.0×** |
 
-Measured 2026-11-15, scalar code (no SIMD module yet). Exactness costs here: the
-specification's saturating chains are serial where opencore's plain sums vectorise (the
-straight port with the corrections ran at 0.76×). Exact fast paths win it back: a bound
-proves no partial sum can saturate (`2·max|x|·Σ|c| < 2^31`, or from the coefficients alone),
-then a plain dot product runs, with the specification's chain as the fallback.
+Measured 2026-11-15 (two runs: all 2.00× and 2.02×; 8.85 varies 1.90–2.04×). The frame decoder
+runs in an AVX2 copy of the same source when the CPU has AVX2 (+4% over the portable build).
+Exactness costs: the specification's saturating chains are serial where opencore's plain sums
+vectorise (the straight port with the corrections ran at 0.76×). The gains come from exact
+reformulations: bounds that prove a chain can't saturate (checked after a fast pass over the
+outputs it made), saturations collapsed into one clamp (a clamp is monotone), energies in
+closed form, the synthesis filters in blocks with only in-block terms serial, and the
+follow-on filters run beside them per block.
 
 ### Robustness: defects found in opencore's AMR-WB decoder (each absent in the Rust port)
 1. **Wrapping where TS 26.173 saturates** (as amr-nb's defect 10): `HP50_12k8`, `Pred_lt4`,
@@ -335,3 +343,74 @@ then a plain dot product runs, with the specification's chain as the fallback.
    out of bounds; in Rust it panicked (index out of bounds). Comfort noise reaches it: after a
    SID_FIRST averages a history of maximal speech ISFs, the dithering pushes ISF 14 past
    16384 and clamps it there. Now indexed exactly (`ind ≤ 127`, `offset ≤ 128`, same value).
+
+## amr-wb encoder (AMR-WB, TS 26.190)
+The AMR-WB encoder, ported from vo-amrwbenc 0.1.3 (Apache-2.0) module by module, with the
+saturation of the TS 26.173 reference (vo's `vo_*` macros and plain sums wrap where it
+saturates), including CR 26.173-0032 (pitch-gain clipping at 6.60/8.85 kbit/s) and -0036
+(`c4t64fx` impulse-response scaling), which vo-amrwbenc predates. No `unsafe`.
+
+### Conformance (`cargo test --release -p amr-wb --test enc_conformance`)
+The whole encoder set of 3GPP TS 26.174 v19.0.0: every `.inp` with its `.cod` (T00–T21 in each
+mode, DTX sequences, mode switching: 221 cases), the frame-synchronisation set (2,880 cases,
+each compared at the 2nd frame after its last decoder homing frame) and bit synchronisation
+(`bitsync.inp`: per mode, exactly the unshifted homing triplet gives a homing frame), as
+TS 26.074 §8 describes for AMR. Bit-exact = every output word (frame type, mode, bits) equal.
+
+| encoder | cases | bit-exact | bit sync |
+|---|---:|---:|---:|
+| amr-wb (Rust) | 3,101 | **3,101/3,101** | **9/9** |
+| 3GPP TS 26.173 reference C (`ref26173-sys`) | 3,101 | 3,101/3,101 | 9/9 |
+| vo-amrwbenc 0.1.3 (C) | 3,101 | 3,006/3,101 | |
+
+vo-amrwbenc fails 95, 90 of them also on the vectors from before the two CRs (its `vo_*`
+macros and plain sums wrap where the specification saturates). The Rust encoder also passes the vectors in the overflow-checked debug build.
+
+### Against the TS 26.173 reference (`cargo test -p amr-wb`)
+- **Whole encoder** on 64 stress streams of 300 frames (`enc_vs_ref`): real speech scaled up to
+  clipping, white noise at every level, held tones and sweeps up to full scale, full-scale
+  square waves, silence and near-silence, encoder homing frames, speech with random bursts;
+  mode switching, DTX on and off. All bit-exact. Classes are held for runs of frames: with a new
+  class every frame, the CR 0036 branch (a peaky impulse response from a resonant LPC filter)
+  was never reached (its mutant survived; held tones reach it).
+- **Modules**, each against its `refwb_*` function: the operators (`Div_32`, `Log2`, `shr`,
+  `div_s`, `Mpy_32_16`), `Decim_12k8`, `Scale_sig`, `Preemph`/`Preemph2`, `Deemph2`, `Residu`,
+  `Syn_filt` (orders 16/20, in place, both updates), `Convolve`, `Updt_tar`, `LP_Decim2`,
+  `HP400_12k8`, `Autocorr`→`Lag_window`→`Levinson`→`Az_isp`→`Isp_isf` on signal classes and on
+  arbitrary autocorrelations and A(z) (Levinson's unstable-filter and Az_isp's too-few-roots
+  fallbacks), `Qpisf_2s_46b`/`36b` and `Qisf_ns`, `Pitch_med_ol`/`Hp_wsp`/`Med_olag`, `wb_vad`
+  (the whole `VadVars` after every frame) and `ilog2` on every input, the encoder DTX
+  (`dtx_enc`, `dtx_buffer`, `tx_dtx_handler`, the whole state), `Pitch_fr4`, `G_pitch`,
+  `Gp_clip` (CR 0032), `cor_h_x`, `ACELP_2t64_fx`, `ACELP_4t64_fx` (every bit allocation,
+  CR 0036's scaling), the pulse coders, `Q_gain2`. Sequences for the stateful ones; a mutant of
+  every special case fails.
+
+### Fuzzing (`just fuzz wb_encode_vs_ref [seconds]`)
+As the decoder's (nightly-2026-11-01, ASan on the Rust side), 2026-11-16.
+
+| target | checks | runs | cov | findings |
+|---|---|---:|---:|---|
+| `wb_encode_vs_ref` | Rust encoder vs the TS 26.173 reference's frame loop (homing, `Write_serial` frame types) on arbitrary PCM, DTX on/off, any mode per frame (each frame repeated 1–8 times, scaled down 0–15 bits: DTX and SID frames reached; a DTX-only mutant fails in ~4 min) | 55,720 (30 min) | 2,895 | none |
+
+### Encoder speed (`CRATE=amr-wb BENCH=enc just bench`)
+µs per 20 ms frame, best of 15, on the single-mode vectors' input PCM (T00–T20, no DTX). Both
+run their frame loop (homing test, 14-bit input, serial output); vo-amrwbenc at -O3, its C path
+(no ARM assembly).
+
+| mode | Rust | C | speedup |
+|---|---:|---:|---:|
+| 6.60 | 205.7 | 108.5 | 0.53× |
+| 8.85 | 252.6 | 121.6 | 0.48× |
+| 12.65 | 299.5 | 137.6 | 0.46× |
+| 14.25 | 331.7 | 145.3 | 0.44× |
+| 15.85 | 332.3 | 147.3 | 0.44× |
+| 18.25 | 345.5 | 152.2 | 0.44× |
+| 19.85 | 364.2 | 153.9 | 0.42× |
+| 23.05 | 357.2 | 154.8 | 0.43× |
+| 23.85 | 299.4 | 156.5 | 0.52× |
+| **all** | **309.8** | **142.0** | **0.46×** |
+
+Measured 2026-11-16 (a 3-rep run before: all 0.46×, 281 vs 130 µs).
+
+The straight port (the reference's saturating chains, no fast paths yet) runs at about half
+vo-amrwbenc's speed; the decoder's straight port was at 0.76× before its speed work.

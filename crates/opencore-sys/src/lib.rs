@@ -2,7 +2,7 @@
 //!
 //! Public interfaces (`interf_dec.h`/`interf_enc.h`, `dec_if.h`) plus internal functions that
 //! the Rust ports are differentially tested against. Signatures mirror the C headers exactly.
-//! Features: `nb` (AMR-NB codec), `wb` (AMR-WB decoder).
+//! Features: `nb` (AMR-NB codec), `wb` (AMR-WB decoder), `wbenc` (AMR-WB encoder: vo-amrwbenc).
 #![allow(unsafe_code, missing_docs, non_snake_case)]
 
 use std::ffi::c_void;
@@ -43,4 +43,20 @@ unsafe extern "C" {
         prms: *mut i16,
         out: *mut i16,
     );
+}
+
+#[cfg(feature = "wbenc")]
+unsafe extern "C" {
+    /// `shim_wbenc.c`: vo-amrwbenc in its default output format, the TS 26.174 `.cod` layout
+    /// (0x6b21, TX frame type, mode, one ±127 word per bit). `speech` is copied, not modified.
+    pub fn vo_wbenc_init() -> *mut c_void;
+    pub fn vo_wbenc_exit(state: *mut c_void);
+    /// One 320-sample frame; `out` holds 480 words. Returns the words written.
+    pub fn vo_wbenc_encode(
+        state: *mut c_void,
+        mode: i32,
+        dtx: i32,
+        speech: *const i16,
+        out: *mut i16,
+    ) -> i32;
 }

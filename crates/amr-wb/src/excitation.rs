@@ -20,6 +20,7 @@ const L_INTERPOL2: usize = 16;
 /// and then the chain is the plain dot product. Three filter rows have `Σ|c| < 32768` (always
 /// fast); the fourth needs `max|x| < 30085`, checked against a running maximum of everything
 /// the loop can read (the past excitation and the outputs so far).
+#[inline(always)] // into simd::decode's AVX2 copy
 pub(crate) fn pred_lt4(buf: &mut [i16], pos: usize, t0: i16, frac: i16, l_subfr: usize) {
     let mut start = pos as isize - t0 as isize;
     let mut frac = -frac;
@@ -511,12 +512,16 @@ pub(crate) fn shr3_round(x: i16) -> i16 {
 
 /// `agc2_amr_wb`: scales `sig_out` to the energy of `sig_in`.
 pub(crate) fn agc2_amr_wb(sig_in: &[i16], sig_out: &mut [i16]) {
-    let temp = sig_out[0] >> 2;
-    let mut s = fxp_mul_16by16(temp, temp) << 1;
-    for &v in &sig_out[1..] {
-        let t = v >> 2;
-        s = mac_16by16_to_int32(s, t, t);
-    }
+    // The C's energy chains (2·t² from t = v >> 2, then L_mac of the others): terms >= 0
+    // and |t| <= 8192, so each is min(Σ 2·t², MAX_32), a plain sum.
+    let energy = |x: &[i16]| {
+        let e: u64 = x
+            .iter()
+            .map(|&v| ((v >> 2) as i32 * (v >> 2) as i32) as u64)
+            .sum();
+        (2 * e).min(MAX_32 as u64) as i32
+    };
+    let s = energy(sig_out);
     if s == 0 {
         return;
     }
@@ -524,12 +529,7 @@ pub(crate) fn agc2_amr_wb(sig_in: &[i16], sig_out: &mut [i16]) {
     // `L_shl` as TS 26.173: exp = -1 (energy >= 2^30) halves s; opencore's `s << exp` became
     // a shift by 31 on x86
     let gain_out = amr_wb_round(shl_int32(s, exp));
-    let temp = sig_in[0] >> 2;
-    let mut s = mul_16by16_to_int32(temp, temp);
-    for &v in &sig_in[1..] {
-        let t = v >> 2;
-        s = mac_16by16_to_int32(s, t, t);
-    }
+    let s = energy(sig_in);
     let g0 = if s == 0 {
         0
     } else {
@@ -543,7 +543,9 @@ pub(crate) fn agc2_amr_wb(sig_in: &[i16], sig_out: &mut [i16]) {
         amr_wb_round(shl_int32(s, 9))
     };
     for v in sig_out.iter_mut() {
-        *v = extract_h(shl_int32(fxp_mul_16by16(*v, g0), 3));
+        // extract_h(L_shl(v·g0, 3)), the saturation as a clamp (each sample on its own)
+        let p = (*v as i64 * g0 as i64) << 3;
+        *v = (p.clamp(i32::MIN as i64, i32::MAX as i64) >> 16) as i16;
     }
 }
 

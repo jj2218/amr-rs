@@ -1,8 +1,14 @@
-amr-wb: a Rust port of the AMR-WB decoder from opencore-amr 0.1.6.
+amr-wb: a Rust port of the AMR-WB decoder from opencore-amr 0.1.6 and of the AMR-WB encoder
+from vo-amrwbenc 0.1.3.
 
 This product includes software derived from opencore-amr
 (https://sourceforge.net/projects/opencore-amr/):
   Copyright (C) 1998-2009 PacketVideo
+  Licensed under the Apache License, Version 2.0.
+
+This product includes software derived from vo-amrwbenc
+(https://sourceforge.net/projects/opencore-amr/), "Additional Codecs":
+  Copyright 2003-2010 VisualOn
   Licensed under the Apache License, Version 2.0.
 
 Portions are derived from the following 3GPP standard:

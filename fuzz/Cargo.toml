@@ -53,3 +53,10 @@ path = "fuzz_targets/wb_rfc4867.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "wb_encode_vs_ref"
+path = "fuzz_targets/wb_encode_vs_ref.rs"
+test = false
+doc = false
+bench = false

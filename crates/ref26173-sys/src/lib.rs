@@ -1,7 +1,7 @@
 //! The 3GPP TS 26.173 AMR-WB reference C code, the unit-test oracle: every symbol it defines is
 //! prefixed `refwb_` (see build.rs). Tests declare the internal functions they call themselves,
 //! with the reference signatures (`Word16 = i16`, `Word32 = i32`, `Flag = i32`); the decoder's
-//! entry points are declared here.
+//! and encoder's entry points are declared here.
 //!
 //! The reference keeps its overflow flag in one global (`refwb_Overflow`), shared by every
 //! thread: hold [`lock`] while calling into it (tests run in parallel).
@@ -31,7 +31,22 @@ unsafe extern "C" {
         state: *mut c_void,
         frame_type: i16,
     );
+    /// `cod_main.c`: allocates and resets an encoder state.
+    pub fn refwb_Init_coder(state: *mut *mut c_void);
+    pub fn refwb_Close_coder(state: *mut c_void);
+    pub fn refwb_Reset_encoder(state: *mut c_void, reset_all: i16);
+    /// One frame: `mode` in (0..=8), out: `MRDTX` (9) for a SID/NO_DATA frame; `prms` the
+    /// serial bits (±127), `ser_size` their count.
+    pub fn refwb_coder(
+        mode: *mut i16,
+        speech16k: *mut i16,
+        prms: *mut i16,
+        ser_size: *mut i16,
+        state: *mut c_void,
+        allow_dtx: i16,
+    );
     /// `homing.c`
+    pub fn refwb_encoder_homing_frame_test(input: *mut i16) -> i16;
     pub fn refwb_decoder_homing_frame_test(prms: *mut i16, mode: i16) -> i16;
     pub fn refwb_decoder_homing_frame_test_first(prms: *mut i16, mode: i16) -> i16;
 }
@@ -141,5 +156,97 @@ impl Drop for Decoder {
     fn drop(&mut self) {
         // SAFETY: `st` came from Init_decoder and is freed once.
         unsafe { refwb_Close_decoder(self.st) };
+    }
+}
+
+/// The reference encoder's frame loop (`coder.c` `main`, default bitstream format): homing per
+/// TS 26.173, the 2 LSBs cleared (14-bit input), the TX frame type from `Write_serial`.
+pub struct Encoder {
+    st: *mut c_void,
+    allow_dtx: bool,
+    // `TX_State` (bits.c)
+    sid_update_counter: i16,
+    sid_handover_debt: i16,
+    prev_ft: i16,
+}
+
+/// `TX_SPEECH`, `TX_SID_FIRST`, `TX_SID_UPDATE`, `TX_NO_DATA` (`dtx.h`); `MRDTX` (`cnst.h`).
+const TX_SPEECH: i16 = 0;
+const TX_SID_FIRST: i16 = 1;
+const TX_SID_UPDATE: i16 = 2;
+const TX_NO_DATA: i16 = 3;
+const MRDTX: i16 = 9;
+
+impl Encoder {
+    pub fn new(allow_dtx: bool) -> Self {
+        let mut st = std::ptr::null_mut();
+        // SAFETY: Init_coder allocates and writes the state pointer.
+        unsafe { refwb_Init_coder(&mut st) };
+        Self {
+            st,
+            allow_dtx,
+            sid_update_counter: 3,
+            sid_handover_debt: 0,
+            prev_ft: TX_SPEECH,
+        }
+    }
+
+    /// Encodes one frame at `mode` (0..=8) into `out` as a `.cod` vector frame stores it:
+    /// 0x6b21, the TX frame type, `mode`, then one ±127 word per bit. Returns the words written.
+    pub fn encode(&mut self, mode: i16, speech: &[i16; 320], out: &mut [i16; 480]) -> usize {
+        let _g = lock();
+        let mut signal = *speech;
+        let mut prms = [0i16; 477];
+        let mut coding_mode = mode;
+        let mut nb_bits = 0;
+        // SAFETY: `signal` holds 320 samples, `prms` the largest frame, `st` is live.
+        unsafe {
+            let reset = refwb_encoder_homing_frame_test(signal.as_mut_ptr());
+            for s in &mut signal {
+                *s &= !3;
+            }
+            refwb_coder(
+                &mut coding_mode,
+                signal.as_mut_ptr(),
+                prms.as_mut_ptr(),
+                &mut nb_bits,
+                self.st,
+                i16::from(self.allow_dtx),
+            );
+            if reset != 0 {
+                refwb_Reset_encoder(self.st, 1);
+            }
+        }
+        // Write_serial (bits.c)
+        let frame_type = if coding_mode == MRDTX {
+            self.sid_update_counter -= 1;
+            if self.prev_ft == TX_SPEECH {
+                self.sid_update_counter = 3;
+                TX_SID_FIRST
+            } else if self.sid_handover_debt > 0 && self.sid_update_counter > 2 {
+                self.sid_handover_debt -= 1;
+                TX_SID_UPDATE
+            } else if self.sid_update_counter == 0 {
+                self.sid_update_counter = 8;
+                TX_SID_UPDATE
+            } else {
+                TX_NO_DATA
+            }
+        } else {
+            self.sid_update_counter = 8;
+            TX_SPEECH
+        };
+        self.prev_ft = frame_type;
+        let n = nb_bits as usize;
+        out[..3].copy_from_slice(&[0x6b21, frame_type, mode]);
+        out[3..3 + n].copy_from_slice(&prms[..n]);
+        3 + n
+    }
+}
+
+impl Drop for Encoder {
+    fn drop(&mut self) {
+        // SAFETY: `st` came from Init_coder and is freed once.
+        unsafe { refwb_Close_coder(self.st) };
     }
 }

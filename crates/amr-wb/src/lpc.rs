@@ -194,9 +194,15 @@ fn get_isp_pol<const SCALE: u32>(isp: &[i16], f: &mut [i32], n: usize) {
     for i in 2..=n {
         f[fi] = f[fi - 2];
         for _ in 1..i {
-            let t0 = shl_int32(mpy_32_16(f[fi - 1], isp[ii]), 1);
-            f[fi] = sub_int32(f[fi], t0);
-            f[fi] = add_int32(f[fi], f[fi - 2]);
+            // L_shl(Mpy_32_16(x, n), 1) as one clamp: Mpy_32_16 is sat(L_mult(hi, n) +
+            // 2·((lo·n) >> 15)) (lo in [0, 2^15): no inner saturation), and
+            // clamp(2·clamp(v)) = clamp(2v). L_mult's own saturation (hi = n = -32768) is
+            // covered too: 2v >= 2·(2^31 - 2^16) clamps to MAX_32 either way.
+            let (hi, lo) = int32_to_dpf(f[fi - 1]);
+            let n = isp[ii] as i64;
+            let v = 2 * (hi as i64 * n) + 2 * ((lo as i64 * n) >> 15);
+            let t0 = (2 * v).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+            f[fi] = add_int32(sub_int32(f[fi], t0), f[fi - 2]);
             fi -= 1;
         }
         f[fi] = msu_16by16_from_int32(f[fi], isp[ii], half);

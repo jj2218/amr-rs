@@ -5,8 +5,8 @@
 #![allow(unsafe_code)]
 
 use crate::basic_op::*;
-use crate::excitation::pred_lt4;
-use crate::lpc::isf_isp;
+use crate::excitation::{agc2_amr_wb, pred_lt4};
+use crate::lpc::{isf_isp, isp_az};
 use crate::synthesis::*;
 use crate::testutil::{Rng, with_ref};
 
@@ -45,6 +45,9 @@ unsafe extern "C" {
     fn refwb_Oversamp_16k(sig12k8: *mut i16, lg: i16, sig16k: *mut i16, mem: *mut i16);
     fn refwb_Filt_6k_7k(signal: *mut i16, lg: i16, mem: *mut i16);
     fn refwb_Filt_7k(signal: *mut i16, lg: i16, mem: *mut i16);
+    fn refwb_Dot_product12(x: *mut i16, y: *mut i16, lg: i16, exp: *mut i16) -> i32;
+    fn refwb_Isp_Az(isp: *mut i16, a: *mut i16, m: i16, adaptive_scaling: i16);
+    fn refwb_agc2(sig_in: *mut i16, sig_out: *mut i16, l_trm: i16);
 }
 
 const N: usize = 50_000;
@@ -69,6 +72,90 @@ fn operators_match_reference() {
             }
         }
     });
+}
+
+/// Energies (the codec's only use) and dot products, quiet to saturating (`loud`, -32768
+/// included), 64 and 80 samples.
+#[test]
+fn dot_product12_matches_reference() {
+    let mut r = Rng::new(6);
+    for k in 0..N / 10 {
+        let n = if k % 2 == 0 { 64 } else { 80 };
+        let shift = (r.u64() % 16) as u32;
+        let loud = k % 5 == 0;
+        let mut x: Vec<i16> = (0..n).map(|_| sample(&mut r, loud) >> shift).collect();
+        let mut y: Vec<i16> = (0..n).map(|_| sample(&mut r, loud)).collect();
+        with_ref(|| {
+            for same in [true, false] {
+                let (mut e, mut ce) = (0i16, 0i16);
+                let got = if same {
+                    dot_product12(&x, &x, &mut e)
+                } else {
+                    dot_product12(&x, &y, &mut e)
+                };
+                let yp = if same { x.as_mut_ptr() } else { y.as_mut_ptr() };
+                // SAFETY: both buffers hold n samples.
+                let want = unsafe { refwb_Dot_product12(x.as_mut_ptr(), yp, n as i16, &mut ce) };
+                assert_eq!((got, e), (want, ce), "Dot_product12 case {k} same {same}");
+            }
+        });
+    }
+}
+
+/// ISPs (cosines, Q15) of order 16 and 20, both scalings: realistic (decreasing), clustered at
+/// ±1 (the polynomial chains saturate) and arbitrary.
+#[test]
+fn isp_az_matches_reference() {
+    let mut r = Rng::new(8);
+    for k in 0..N / 10 {
+        let m = if k % 2 == 0 { 16 } else { 20 };
+        let mut isp: Vec<i16> = match k % 3 {
+            0 => {
+                let mut v: Vec<i16> = (0..m).map(|_| r.i16()).collect();
+                v.sort_unstable_by(|a, b| b.cmp(a));
+                v
+            }
+            1 => (0..m)
+                .map(|_| match r.u64() % 4 {
+                    0 => i16::MIN,
+                    1 => i16::MAX,
+                    2 => i16::MIN + (r.u64() % 2048) as i16,
+                    _ => i16::MAX - (r.u64() % 2048) as i16,
+                })
+                .collect(),
+            _ => (0..m).map(|_| r.i16()).collect(),
+        };
+        let adaptive = r.u64().is_multiple_of(2);
+        let mut a = [0i16; 21];
+        let mut c = [0i16; 21];
+        isp_az(&isp, &mut a[..=m], adaptive);
+        // SAFETY: isp holds m values, c m + 1.
+        with_ref(|| unsafe {
+            refwb_Isp_Az(isp.as_mut_ptr(), c.as_mut_ptr(), m as i16, adaptive as i16)
+        });
+        assert_eq!(a, c, "Isp_Az case {k} m {m} adaptive {adaptive}");
+    }
+}
+
+/// The 6.60/8.85 kbit/s gain control: quiet to full-scale (saturating energies and outputs)
+/// signals, silent ones.
+#[test]
+fn agc2_matches_reference() {
+    let mut r = Rng::new(10);
+    for k in 0..N / 10 {
+        let (si, so) = ((r.u64() % 16) as u32, (r.u64() % 16) as u32);
+        let (li, lo) = (k % 3 == 0, k % 5 == 0);
+        let mut x: Vec<i16> = (0..64).map(|_| sample(&mut r, li) >> si).collect();
+        let mut y: Vec<i16> = (0..64).map(|_| sample(&mut r, lo) >> so).collect();
+        if k % 7 == 0 {
+            x.fill(0);
+        }
+        let mut c = y.clone();
+        agc2_amr_wb(&x, &mut y);
+        // SAFETY: both hold 64 samples.
+        with_ref(|| unsafe { refwb_agc2(x.as_mut_ptr(), c.as_mut_ptr(), 64) });
+        assert_eq!(y, c, "agc2 case {k}");
+    }
 }
 
 /// A signal sample: mostly realistic, sometimes edge values; `loud` pins most at full scale.
@@ -149,6 +236,34 @@ fn syn_filt_32_matches_reference() {
         });
         assert_eq!((hi, lo), (ch, cl), "Syn_filt_32 case {k} large {large}");
     }
+    // the low halves' chain saturating alone (quiet high halves): the fast path's 2·Lmax·A bound.
+    // A stable filter, (1 + 0.17/z)^16 (Σ|a[1..]| = 11.3 in Q12), so the outputs stay small.
+    let mut p = [0f64; M + 1];
+    p[0] = 1.0;
+    for _ in 0..M {
+        for k in (1..=M).rev() {
+            p[k] += 0.17 * p[k - 1];
+        }
+    }
+    let mut a: [i16; M + 1] = std::array::from_fn(|k| (p[k] * 4096.0).round() as i16);
+    let mut exc = [0i16; 64];
+    let (mut hi, mut lo) = ([0i16; M + 64], [0i16; M + 64]);
+    lo[..M].fill(-32768);
+    let (mut ch, mut cl) = (hi, lo);
+    syn_filt_32(&a, M, &exc, 0, &mut hi, &mut lo, 64);
+    // SAFETY: as above.
+    with_ref(|| unsafe {
+        refwb_Syn_filt_32(
+            a.as_mut_ptr(),
+            M as i16,
+            exc.as_mut_ptr(),
+            0,
+            ch.as_mut_ptr().add(M),
+            cl.as_mut_ptr().add(M),
+            64,
+        )
+    });
+    assert_eq!((hi, lo), (ch, cl), "Syn_filt_32, saturating low halves");
 }
 
 #[test]
@@ -189,6 +304,9 @@ fn filters_match_reference_over_sequences() {
     let mut r = Rng::new(5);
     for seq in 0..200 {
         let loud = seq % 2 == 0;
+        // full-scale square waves: a high-pass's undershoot plus the next edge saturates HP50
+        // (random loud samples never reach it)
+        let (square, hold, mut t) = (seq % 4 == 1, 32 + r.u64() % 224, 0u64);
         let (mut m50, mut c50) = ([0i16; 6], [0i16; 6]);
         let (mut m400, mut c400) = ([0i16; 6], [0i16; 6]);
         let (mut mos, mut cos) = ([0i16; 24], [0i16; 24]);
@@ -196,8 +314,16 @@ fn filters_match_reference_over_sequences() {
         let (mut mlp, mut clp) = ([0i16; 30], [0i16; 30]);
         let (mut mde, mut cde) = (0i16, 0i16);
         for call in 0..40 {
-            let s64: [i16; 64] = std::array::from_fn(|_| sample(&mut r, loud));
-            let s80: [i16; 80] = std::array::from_fn(|_| sample(&mut r, loud));
+            let mut next = |r: &mut Rng| {
+                t += 1;
+                match square {
+                    true if (t / hold) % 2 == 0 => i16::MAX,
+                    true => i16::MIN,
+                    false => sample(r, loud),
+                }
+            };
+            let s64: [i16; 64] = std::array::from_fn(|_| next(&mut r));
+            let s80: [i16; 80] = std::array::from_fn(|_| next(&mut r));
             let lo: [i16; 64] = std::array::from_fn(|_| (r.u64() % 4096) as i16);
             let ctx = format!("sequence {seq} call {call}");
             with_ref(|| {

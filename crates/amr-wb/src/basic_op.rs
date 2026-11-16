@@ -279,10 +279,16 @@ pub(crate) fn power_of_2(exponant: i16, fraction: i16) -> i32 {
 /// Normalised `Σ x·y` (+1, saturating), as (mantissa, exponent). `lg` a multiple of 8.
 pub(crate) fn dot_product12(x: &[i16], y: &[i16], exp: &mut i16) -> i32 {
     debug_assert!(x.len() == y.len() && x.len().is_multiple_of(8));
-    let mut sum = 1i32;
-    for (&a, &b) in x.iter().zip(y) {
-        sum = mac_16by16_to_int32(sum, a, b);
-    }
+    let sum = if std::ptr::eq(x, y) {
+        // an energy: the terms are >= 0 (L_mult saturates only up), so the chain is
+        // min(1 + Σ 2·a², MAX_32), a plain sum
+        let e: u64 = x.iter().map(|&a| (a as i32 * a as i32) as u64).sum();
+        (1 + 2 * e).min(MAX_32 as u64) as i32
+    } else {
+        x.iter()
+            .zip(y)
+            .fold(1i32, |sum, (&a, &b)| mac_16by16_to_int32(sum, a, b))
+    };
     let sft = normalize_amr_wb(sum);
     *exp = 30 - sft;
     sum.wrapping_shl(sft as u32)

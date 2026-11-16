@@ -106,7 +106,7 @@ fn row(name: &str, rust: f64, c: f64, frames: usize) {
 
 fn decoder() {
     let cases = common::cases();
-    #[cfg(amr_nb_stages)]
+    #[cfg(codec_stages)]
     println!(
         "stages dec  {}",
         amr_nb::stages::NAMES_DEC
@@ -126,7 +126,7 @@ fn decoder() {
             .collect();
         let frames: usize = set.iter().map(|c| c.frames.len()).sum();
         let mode = MODE[m];
-        #[cfg(amr_nb_stages)]
+        #[cfg(codec_stages)]
         amr_nb::stages::take();
         let rust = best(|| {
             for c in &set {
@@ -138,7 +138,7 @@ fn decoder() {
                 }
             }
         });
-        #[cfg(amr_nb_stages)]
+        #[cfg(codec_stages)]
         {
             let ns = amr_nb::stages::take();
             let per = (frames * reps()) as f64 * 1e3;
@@ -197,7 +197,7 @@ fn total(tr: f64, tc: f64, tn: usize) {
 fn encoder() {
     // NODTX speech `T<nn>_<mode>` only (not T21's mode switching): reads only those files.
     let cases = common::encoder_cases_where(|n| n.starts_with("nodtx/T") && n.contains('_'));
-    #[cfg(amr_nb_stages)]
+    #[cfg(codec_stages)]
     println!(
         "stages mode {}",
         amr_nb::stages::NAMES
@@ -217,7 +217,7 @@ fn encoder() {
             .map(|c| c.input.as_chunks::<{ common::L_FRAME }>().0)
             .collect();
         let frames: usize = inputs.iter().map(|i| i.len()).sum();
-        #[cfg(amr_nb_stages)]
+        #[cfg(codec_stages)]
         amr_nb::stages::take();
         let rust = best(|| {
             for input in &inputs {
@@ -227,9 +227,9 @@ fn encoder() {
                 }
             }
         });
-        // `--cfg amr_nb_stages` (`BENCH=stages`): µs per frame per encoder stage (the mean
+        // `--cfg codec_stages` (`BENCH=stages`): µs per frame per encoder stage (the mean
         // over every rep, timer overhead included), then the next mode.
-        #[cfg(amr_nb_stages)]
+        #[cfg(codec_stages)]
         {
             let ns = amr_nb::stages::take();
             let per = (frames * reps()) as f64 * 1e3;

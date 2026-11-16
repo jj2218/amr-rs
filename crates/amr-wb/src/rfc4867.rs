@@ -4,7 +4,9 @@
 //! Supported: single channel; RTP without interleaving, CRCs or robust sorting (the SDP
 //! defaults). Speech bits are carried in the class-sorted order of TS 26.201 (opencore's
 //! `mime_io.cpp` sorting tables); a SID frame (frame type 9) carries 35 comfort-noise bits,
-//! the SID type indicator (STI) and a 4-bit mode indication (most significant bit first).
+//! the SID type indicator (STI) and a 4-bit mode indication (most significant bit first);
+//! a SID_FIRST frame's comfort-noise bits are written as zeros, as the TS 26.173 reference's
+//! `.awb` writer does (decoders don't use them).
 //! Frame type 14 is SPEECH_LOST, 15 NO_DATA; 10..=13 are reserved.
 //!
 //! ```
@@ -330,10 +332,12 @@ fn write_frame(w: &mut BitWriter, f: &Frame, ft: u8) {
             }
         }
         FT_SID => {
+            // SID_FIRST: zeros, as the reference's MIME writer (`Write_serial`) sends.
+            let first = f.frame_type == RxFrameType::SidFirst;
             for &b in &f.bits[..SID_BITS] {
-                w.put(b as u32 & 1, 1);
+                w.put(if first { 0 } else { b as u32 & 1 }, 1);
             }
-            w.put(u32::from(f.frame_type != RxFrameType::SidFirst), 1);
+            w.put(u32::from(!first), 1);
             w.put(f.mode as u32, 4);
         }
         _ => {}
@@ -426,6 +430,15 @@ mod tests {
         f
     }
 
+    /// `f` as the writers send it: a SID_FIRST frame's comfort-noise bits zeroed.
+    pub(super) fn as_written(f: &Frame) -> Frame {
+        let mut f = f.clone();
+        if f.frame_type == SidFirst {
+            f.bits[..SID_BITS].fill(0);
+        }
+        f
+    }
+
     /// Every packable frame: 9 speech modes × good/bad, SID first/update/bad × 9 mode
     /// indications, SPEECH_LOST and NO_DATA.
     pub(super) fn all_kinds(g: &mut Rng) -> Vec<Frame> {
@@ -456,19 +469,23 @@ mod tests {
         let mut g = Rng::new(4867);
         for _ in 0..200 {
             let frames = all_kinds(&mut g);
+            let sent: Vec<Frame> = frames.iter().map(as_written).collect();
             let file = write_storage(&frames).unwrap();
-            assert_eq!(storage(&file).unwrap(), frames, "storage");
+            assert_eq!(storage(&file).unwrap(), sent, "storage");
             for packing in [Packing::OctetAligned, Packing::BandwidthEfficient] {
                 // Single frames, then packets of 1..=4 mixed frames.
                 for f in &frames {
                     let p = write_rtp(Some(f.mode), std::slice::from_ref(f), packing).unwrap();
-                    assert_eq!(rtp(&p, packing).unwrap(), (Some(f.mode), vec![f.clone()]));
+                    assert_eq!(
+                        rtp(&p, packing).unwrap(),
+                        (Some(f.mode), vec![as_written(f)])
+                    );
                 }
                 for chunk in frames.chunks(1 + (g.u64() % 4) as usize) {
                     let p = write_rtp(None, chunk, packing).unwrap();
                     assert_eq!(
                         rtp(&p, packing).unwrap(),
-                        (None, chunk.to_vec()),
+                        (None, chunk.iter().map(as_written).collect()),
                         "{packing:?}"
                     );
                 }
@@ -537,6 +554,15 @@ mod tests {
         let file = write_storage(&[sid]).unwrap();
         // ToC FT 9 Q 1, 35 zero bits, STI=1, MI 0101: byte 4 = 000 1 0101.
         assert_eq!(file[9..], [0x4c, 0, 0, 0, 0, 0x15]);
+        // SID_FIRST: the same with STI=0 and its comfort-noise bits written as zeros.
+        let mut first = Frame::no_data();
+        first.frame_type = SidFirst;
+        first.mode = Mode::MD1825;
+        first.bits[..SID_BITS].fill(1);
+        assert_eq!(
+            write_storage(&[first]).unwrap()[9..],
+            [0x4c, 0, 0, 0, 0, 0x05]
+        );
         // SPEECH_LOST: a ToC octet alone.
         let mut lost = Frame::no_data();
         lost.frame_type = SpeechLost;
@@ -654,7 +680,7 @@ mod tests {
 #[cfg(test)]
 #[allow(unsafe_code)]
 mod vs_ref {
-    use super::tests::{all_kinds, storage};
+    use super::tests::{all_kinds, as_written, storage};
     use super::*;
     use crate::testutil::{Rng, with_ref};
     use std::ffi::c_void;
@@ -744,7 +770,8 @@ mod vs_ref {
         let mut g = Rng::new(26_201);
         for _ in 0..100 {
             let frames = all_kinds(&mut g);
-            compare(&write_storage(&frames).unwrap(), &frames);
+            let sent: Vec<Frame> = frames.iter().map(as_written).collect();
+            compare(&write_storage(&frames).unwrap(), &sent);
         }
     }
 

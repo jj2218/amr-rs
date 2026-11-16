@@ -9,10 +9,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 crate=${CRATE:-amr-nb}  # CRATE=amr-wb: the other codec
-# BENCH=stages: the encoder's and decoder's µs per frame per stage (`--cfg amr_nb_stages` timers,
+# BENCH=stages: the encoder's and decoder's µs per frame per stage (`--cfg codec_stages` timers,
 # mean of all reps, timer overhead included): time attribution, as `perf` is unavailable.
 if [ "${BENCH:-}" = stages ]; then
-    export RUSTFLAGS="${RUSTFLAGS:-} --cfg amr_nb_stages" CARGO_TARGET_DIR="$PWD/target/stages"
+    export RUSTFLAGS="${RUSTFLAGS:-} --cfg codec_stages" CARGO_TARGET_DIR="$PWD/target/stages"
     unset BENCH
     exe=$(cargo bench -p "$crate" --bench codec --no-run 2>&1 | sed -n 's/.*Executable .*(\(.*\)).*/\1/p' | tail -1)
     taskset -c "${BENCH_CPU:-2}" "$exe" | grep "^stages"

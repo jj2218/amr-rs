@@ -4,6 +4,8 @@
 //!   `r_fft`), which it ships but doesn't build (oracle for the Rust port's VAD2; the C encoder
 //!   itself stays VAD1).
 //! - `wb`: the AMR-WB decoder; the list mirrors amrwb/Makefile.am, plus `shim_wb.c`.
+//! - `wbenc`: the AMR-WB encoder, vo-amrwbenc 0.1.3 (`.cache/opencore/vo-amrwbenc-0.1.3`), plus
+//!   `shim_wbenc.c`.
 use std::path::PathBuf;
 
 const DEC: &[&str] = &[
@@ -146,6 +148,56 @@ const WB_DEC: &[&str] = &[
     "voice_factor",
     "wb_syn_filt",
     "weight_amrwb_lpc",
+];
+/// vo-amrwbenc 0.1.3's `amrwbenc/src` list (Makefile.am, without the ARM assembly).
+const WB_ENC: &[&str] = &[
+    "autocorr",
+    "az_isp",
+    "bits",
+    "c2t64fx",
+    "c4t64fx",
+    "convolve",
+    "cor_h_x",
+    "decim54",
+    "deemph",
+    "dtx",
+    "g_pitch",
+    "gpclip",
+    "homing",
+    "hp400",
+    "hp50",
+    "hp6k",
+    "hp_wsp",
+    "int_lpc",
+    "isp_az",
+    "isp_isf",
+    "lag_wind",
+    "levinson",
+    "log2",
+    "lp_dec2",
+    "math_op",
+    "mem_align",
+    "oper_32b",
+    "p_med_ol",
+    "pit_shrp",
+    "pitch_f4",
+    "pred_lt4",
+    "preemph",
+    "q_gain2",
+    "q_pulse",
+    "qisf_ns",
+    "qpisf_2s",
+    "random",
+    "residu",
+    "scale",
+    "stream",
+    "syn_filt",
+    "updt_tar",
+    "util",
+    "voAMRWBEnc",
+    "voicefac",
+    "wb_vad",
+    "weight_a",
 ];
 const COMMON: &[&str] = &[
     "add",
@@ -309,9 +361,30 @@ fn main() {
         }
         b.compile("opencore_amrwb");
     }
+    if std::env::var_os("CARGO_FEATURE_WBENC").is_some() {
+        let vo = std::env::var_os("VO_AMRWBENC_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| cache_dir().join("opencore/vo-amrwbenc-0.1.3"));
+        assert!(
+            vo.join("enc_if.h").exists(),
+            "vo-amrwbenc sources not found at {}: run `just opencore`",
+            vo.display()
+        );
+        let mut b = build();
+        b.include(vo.join("amrwbenc/inc"))
+            .include(vo.join("common/include"));
+        b.file(vo.join("common/cmnMemory.c"));
+        b.file(here.join("shim_wbenc.c"));
+        for f in WB_ENC {
+            b.file(vo.join("amrwbenc/src").join(format!("{f}.c")));
+        }
+        b.compile("vo_amrwbenc");
+    }
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=shim.c");
     println!("cargo:rerun-if-changed=shim_wb.c");
+    println!("cargo:rerun-if-changed=shim_wbenc.c");
+    println!("cargo:rerun-if-env-changed=VO_AMRWBENC_DIR");
     println!("cargo:rerun-if-changed=compat");
     println!("cargo:rerun-if-env-changed=OPENCORE_DIR");
 }
