@@ -36,6 +36,44 @@ const MP1: usize = M + 1;
 const OLD_WSP: usize = PIT_MAX / OPL_DECIM;
 const OLD_EXC: usize = PIT_MAX + L_INTERPOL;
 
+/// The weighted synthesis filter's impulse response: `ap` (then zeros) through `1/A(z)`
+/// (`aq`), the C's chain `round(L_shl(L_mult(x, 16384) − Σ L_mult(aq[j], y[i−j]), 3))`.
+///
+/// Fast path (exact): with `|y| <= Y` no partial sum reaches `2^15·max|ap| + 2·Y·Σ|aq[1..]|`;
+/// below 2^31 the chain is the plain sum and the output one clamp. Y is checked after the fast
+/// pass over the outputs it made: the first output that differed from the chain would have
+/// read only exact ones, all within Y.
+fn impulse_response(ap: &[i16; MP1], aq: &[i16; MP1]) -> [i16; L_SUBFR] {
+    // The C's chain is `Syn_filt`'s with a0 = 16384 and no extra shift: the decoder's block
+    // filter (plain sums; the bound below decides).
+    let mut y = [0i16; M + L_SUBFR];
+    let mut x = [0i16; L_SUBFR];
+    x[..MP1].copy_from_slice(ap);
+    crate::synthesis::wb_syn_fast::<M>(aq, 16384, 0, &mut x, &mut y);
+    let max = |v: &[i16]| v.iter().map(|&s| (s as i32).abs()).max().unwrap_or(0) as i64;
+    let sum_a: i64 = aq[1..].iter().map(|&v| (v as i32).abs() as i64).sum();
+    if (max(ap) << 15) + 2 * max(&y[M..]) * sum_a < 1 << 31 {
+        return y[M..].try_into().unwrap();
+    }
+    impulse_response_chain(ap, aq)
+}
+
+/// `impulse_response` as the C's chain.
+fn impulse_response_chain(ap: &[i16; MP1], aq: &[i16; MP1]) -> [i16; L_SUBFR] {
+    let mut error = [0i16; M + L_SUBFR];
+    error[M..MP1 + M].copy_from_slice(ap);
+    let mut h1 = [0i16; L_SUBFR];
+    for i in 0..L_SUBFR {
+        let mut l = l_mult(error[i + M], 16384);
+        for j in 1..=M {
+            l = l_msu(l, aq[j], error[i + M - j]);
+        }
+        h1[i] = round(l_shl(l, 3));
+        error[i + M] = h1[i];
+    }
+    h1
+}
+
 /// `nb_of_bits`: serial bits per mode (`MRDTX`: a SID frame).
 pub(crate) const NB_OF_BITS: [i16; 10] = [
     NBBITS_7K, NBBITS_9K, NBBITS_12K, NBBITS_14K, NBBITS_16K, NBBITS_18K, NBBITS_20K, NBBITS_23K,
@@ -303,6 +341,7 @@ impl CoderState {
         scale_sig(std::slice::from_mut(&mut self.mem_wsp), exp);
         scale_sig(std::slice::from_mut(&mut self.mem_w0), exp);
 
+        crate::stages::mark(crate::stages::E_PRE);
         // VAD (on the new speech, slightly ahead), DTX
         let mut buf: [i16; L_FRAME] = old_speech[ns..ns + L_FRAME].try_into().unwrap();
         scale_sig(&mut buf, sub(1, q_new));
@@ -320,6 +359,7 @@ impl CoderState {
             prms.parm(vad_flag, 1);
         }
 
+        crate::stages::mark(crate::stages::E_VAD);
         // LP analysis (window centred on the 4th subframe), interpolated A(z) per subframe
         let (mut r_h, mut r_l) = ([0i16; M + 1], [0i16; M + 1]);
         let mut rc = [0i16; M];
@@ -335,6 +375,7 @@ impl CoderState {
         isp_isf(&ispnew, &mut isf);
         gp_clip_test_isf(ser_size, &isf, &mut self.gp_clip);
 
+        crate::stages::mark(crate::stages::E_LPC);
         // weighted speech, decimated by 2 and scaled to 12 bits; open-loop pitch
         let mut ap = [0i16; MP1];
         for (k, p_a) in a.as_chunks::<MP1>().0.iter().enumerate() {
@@ -378,6 +419,7 @@ impl CoderState {
             t_op2 = self.open_loop(&old_wsp, WSP + half, half);
         }
 
+        crate::stages::mark(crate::stages::E_OL);
         let mut exc2 = [0i16; L_FRAME];
         if mode == MRDTX {
             // comfort noise: buffer the ISFs and energy, send the SID parameters
@@ -472,6 +514,7 @@ impl CoderState {
             self.dtx.buffer(&isf, l_shr(l, 1), codec_mode);
         }
 
+        crate::stages::mark(crate::stages::E_ISFQ);
         let range = |t: i16| {
             let t0_min = sub(t, 8).max(PIT_MIN);
             let t0_max = add(t0_min, 15);
@@ -538,17 +581,8 @@ impl CoderState {
                 .copy_from_slice(&old_exc[EXC + i_subfr + L_SUBFR / 2..EXC + i_subfr + L_SUBFR]);
 
             // impulse response of the weighted synthesis filter
-            let mut error = [0i16; M + L_SUBFR];
-            weight_a(p_a, &mut error[M..], GAMMA1);
-            let mut h1 = [0i16; L_SUBFR];
-            for i in 0..L_SUBFR {
-                let mut l = l_mult(error[i + M], 16384);
-                for j in 1..=M {
-                    l = l_msu(l, p_aq[j], error[i + M - j]);
-                }
-                h1[i] = round(l_shl(l, 3));
-                error[i + M] = h1[i];
-            }
+            // ap: weight_a(p_a, GAMMA1), as made for the target above
+            let mut h1 = impulse_response(&ap, p_aq[..MP1].try_into().unwrap());
             let mut t = 0;
             deemph2(&mut h1, TILT_FAC, &mut t);
             let mut h2 = h1;
@@ -556,6 +590,7 @@ impl CoderState {
             scale_sig(&mut xn, shift);
             scale_sig(&mut h1, add(1, shift));
 
+            crate::stages::mark(crate::stages::E_SUB_PRE);
             // closed-loop fractional pitch and its index
             let mut t0_frac = 0;
             let mut t0;
@@ -687,6 +722,7 @@ impl CoderState {
             );
             scale_sig(&mut cn, shift);
 
+            crate::stages::mark(crate::stages::E_CL);
             // the fixed-gain pitch contribution in the impulse response, the innovation
             let mut t = 0;
             preemph(&mut h2, self.tilt_code, &mut t);
@@ -729,6 +765,7 @@ impl CoderState {
             preemph(&mut code, self.tilt_code, &mut t);
             pit_shrp(&mut code, t0, PIT_SHARP);
 
+            crate::stages::mark(crate::stages::E_CB);
             // gains
             let mut l_gain_code = 0i32;
             let nbits = if ser_size <= NBBITS_9K { 6 } else { 7 };
@@ -749,6 +786,7 @@ impl CoderState {
             gp_clip_test_gain_pit(ser_size, gain_pit, &mut self.gp_clip);
             let mut gain_code = round(l_shl(l_gain_code, q_new));
 
+            crate::stages::mark(crate::stages::E_GAIN);
             // voicing → tilt of the next code; target memory; excitation and synthesis
             let mut exc2 = [0i16; L_SUBFR];
             exc2.copy_from_slice(&old_exc[EXC + i_subfr..EXC + i_subfr + L_SUBFR]);
@@ -824,6 +862,7 @@ impl CoderState {
                     self.synthesis(p_aq, &mut exc2, q_new, &speech16k[i_subfr * 5 / 4..]);
                 prms.parm(corr_gain, 4);
             }
+            crate::stages::mark(crate::stages::E_SUB_POST);
         }
         self.old_speech.copy_from_slice(&old_speech[L_FRAME..]);
         self.old_wsp
@@ -944,5 +983,36 @@ impl CoderState {
             }
         }
         ind
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::Rng;
+
+    /// The impulse response's fast path against the C's chain (which the conformance vectors
+    /// check): real-looking filters, then wild coefficients and loud `ap` (the guard fails).
+    #[test]
+    fn impulse_response_matches_chain() {
+        let mut r = Rng::new(51);
+        for n in 0..200_000u64 {
+            let wild = n % 4;
+            let ap: [i16; MP1] = std::array::from_fn(|i| match wild {
+                0 => r.i16(),
+                _ if i == 0 => 4096,
+                _ => r.i16() >> (2 + i.min(12)),
+            });
+            let aq: [i16; MP1] = std::array::from_fn(|i| match wild {
+                0 | 1 => r.i16() >> (n % 6),
+                _ if i == 0 => 4096,
+                _ => r.i16() >> (3 + i.min(12)),
+            });
+            assert_eq!(
+                impulse_response(&ap, &aq),
+                impulse_response_chain(&ap, &aq),
+                "{n}"
+            );
+        }
     }
 }

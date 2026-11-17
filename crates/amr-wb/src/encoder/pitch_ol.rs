@@ -4,6 +4,7 @@
 use super::ops::*;
 use crate::enc_tables::{CORRWEIGHT, HP_WSP_A as A, HP_WSP_B as B};
 use crate::excitation::median5;
+pub(crate) use crate::simd::pitch_med_ol;
 
 /// `Init_Hp_wsp` is a zeroed `[i16; 9]`. `scale_mem_Hp_wsp`: rescales the high-pass memory
 /// by `2^exp` (the outputs in double precision, the inputs rounded).
@@ -59,7 +60,8 @@ pub(crate) fn hp_wsp(wsp: &[i16], hp_wsp: &mut [i16], mem: &mut [i16; 9]) {
 /// correlation of `wsp[at..at + l_frame]` (history before `at`), and its normalised
 /// correlation on the high-passed signal (`gain`). `old_hp_wsp` holds `l_max` past high-passed
 /// samples, then room for `l_frame`.
-pub(crate) fn pitch_med_ol(
+#[inline(always)]
+pub(crate) fn pitch_med_ol_portable(
     wsp: &[i16],
     at: usize,
     l_min: i16,
@@ -76,10 +78,19 @@ pub(crate) fn pitch_med_ol(
     let mut max = i32::MIN;
     let mut tm = 0i16;
     let x = &wsp[at..at + l_frame];
+    // every partial sum is at most sqrt(Σx²·Σw²) in magnitude over the window w of all lags
+    // (Cauchy–Schwarz): below 2^30 the chains are plain sums
+    let e = |v: &[i16]| v.iter().map(|&s| s as i64 * s as i64).sum::<i64>();
+    let w = &wsp[at - l_max as usize..at + l_frame - 1 - l_min as usize];
+    const B: i128 = (1 << 30) - 1;
+    let plain = e(x) as i128 * e(w) as i128 <= B * B;
     for i in (l_min + 1..=l_max).rev() {
-        let mut r0 = 0i32;
-        for j in 0..l_frame {
-            r0 = l_mac(r0, x[j], wsp[at + j - i as usize]);
+        let y = &wsp[at - i as usize..at - i as usize + l_frame];
+        let mut r0 = if plain { dot(x, y) << 1 } else { 0 };
+        if !plain {
+            for j in 0..l_frame {
+                r0 = l_mac(r0, x[j], y[j]);
+            }
         }
         let (hi, lo) = l_extract(r0);
         r0 = mpy_32_16(hi, lo, CORRWEIGHT[ww]);
@@ -123,6 +134,24 @@ pub(crate) fn pitch_med_ol(
     *gain = round(l_shl(r0, exp_r0));
     old_hp_wsp.copy_within(l_frame..l_frame + lm, 0);
     tm
+}
+
+/// `Σ x·y` over blocks of 16 (wrapping: exact when the caller's bound holds).
+#[inline(always)]
+fn dot(x: &[i16], y: &[i16]) -> i32 {
+    let (xb, xr) = x.as_chunks::<16>();
+    let (yb, yr) = y.as_chunks::<16>();
+    let mut acc = [0i32; 16];
+    for (a, b) in xb.iter().zip(yb) {
+        for k in 0..16 {
+            acc[k] = acc[k].wrapping_add(a[k] as i32 * b[k] as i32);
+        }
+    }
+    let s = xr
+        .iter()
+        .zip(yr)
+        .fold(0i32, |s, (&a, &b)| s.wrapping_add(a as i32 * b as i32));
+    acc.iter().fold(s, |s, &a| s.wrapping_add(a))
 }
 
 /// `Med_olag`: pushes `prev_ol_lag` into the 5 past lags and returns their median.

@@ -1,6 +1,7 @@
 //! Pre-processing (vo-amrwbenc `decim54.c`): 16 kHz → 12.8 kHz decimation.
 
 use crate::enc_tables::FIR_DOWN1;
+pub(crate) use crate::simd::decim_12k8;
 
 /// Filter half-length (`NB_COEF_DOWN`): `Decim_12k8` keeps 2·15 input samples of memory.
 pub(crate) const NB_COEF_DOWN: usize = 15;
@@ -10,7 +11,12 @@ const DOWN_FAC: i32 = 26215;
 const FAC5: usize = 5;
 
 /// `Decim_12k8`: decimates `sig16k` (`lg` samples) to `sig12k8` (`lg·4/5` samples).
-pub(crate) fn decim_12k8(sig16k: &[i16], sig12k8: &mut [i16], mem: &mut [i16; 2 * NB_COEF_DOWN]) {
+#[inline(always)]
+pub(crate) fn decim_12k8_portable(
+    sig16k: &[i16],
+    sig12k8: &mut [i16],
+    mem: &mut [i16; 2 * NB_COEF_DOWN],
+) {
     let lg = sig16k.len();
     let mut signal = [0i16; 320 + 2 * NB_COEF_DOWN];
     signal[..2 * NB_COEF_DOWN].copy_from_slice(mem);
@@ -24,6 +30,7 @@ pub(crate) fn decim_12k8(sig16k: &[i16], sig12k8: &mut [i16], mem: &mut [i16; 2 
 /// `j` interpolates at 5j/4 with the 30-tap phase `frac` of
 /// `fir_down1`. The reference's `Interpol` is an `L_mac` chain, `L_shl(·, 1)` and `round`; no
 /// partial sum can saturate (asserted), so it is one plain sum, then clamp(4·sum) and round.
+#[inline(always)]
 fn down_samp(sig: &[i16], sig_d: &mut [i16]) {
     const _: () = {
         let mut f = 0;

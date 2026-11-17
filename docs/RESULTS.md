@@ -399,18 +399,19 @@ run their frame loop (homing test, 14-bit input, serial output); vo-amrwbenc at 
 
 | mode | Rust | C | speedup |
 |---|---:|---:|---:|
-| 6.60 | 205.7 | 108.5 | 0.53× |
-| 8.85 | 252.6 | 121.6 | 0.48× |
-| 12.65 | 299.5 | 137.6 | 0.46× |
-| 14.25 | 331.7 | 145.3 | 0.44× |
-| 15.85 | 332.3 | 147.3 | 0.44× |
-| 18.25 | 345.5 | 152.2 | 0.44× |
-| 19.85 | 364.2 | 153.9 | 0.42× |
-| 23.05 | 357.2 | 154.8 | 0.43× |
-| 23.85 | 299.4 | 156.5 | 0.52× |
-| **all** | **309.8** | **142.0** | **0.46×** |
+| 6.60 | 62.0 | 94.5 | **1.52×** |
+| 8.85 | 76.5 | 107.6 | **1.41×** |
+| 12.65 | 82.2 | 119.0 | **1.45×** |
+| 14.25 | 87.9 | 126.2 | **1.44×** |
+| 15.85 | 88.4 | 127.3 | **1.44×** |
+| 18.25 | 94.1 | 145.2 | **1.54×** |
+| 19.85 | 105.2 | 150.1 | **1.43×** |
+| 23.05 | 105.2 | 141.1 | **1.34×** |
+| 23.85 | 108.8 | 150.9 | **1.39×** |
+| **all** | **90.0** | **129.1** | **1.43×** |
 
-Measured 2026-11-16 (a 3-rep run before: all 0.46×, 281 vs 130 µs).
-
-The straight port (the reference's saturating chains, no fast paths yet) runs at about half
-vo-amrwbenc's speed; the decoder's straight port was at 0.76× before its speed work.
+Measured 2026-11-17 on main after PRs #61 and #64 (before #64: 1.37×; 2026-11-16: 1.21×; the straight port: 0.46×,
+309.8 vs 142.0 µs).
+Exact fast paths under proven bounds (the reference's saturation is kept: every guard falls
+back to its chain, each with a mutant-checked differential test), the hot kernels dispatched
+to AVX2 per call; the steps are in the development log ("AMR-WB encoder speed").

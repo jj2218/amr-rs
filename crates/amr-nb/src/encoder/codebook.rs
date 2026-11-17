@@ -26,8 +26,8 @@ const NB_TRACK_MR102: usize = 4;
 const STEP_MR102: usize = 4;
 
 pub(crate) use crate::simd::{
-    cor_h_blocks, cor_h_search_8i40, cor_h_tm, filtered_code, search_2i40, search_2i40_sat,
-    search_3i40, search_4i40, search_10i40,
+    cor_h_blocks, cor_h_search_8i40, cor_h_tm, filtered_code, search_2i40, search_3i40,
+    search_4i40, search_10i40,
 };
 
 /// `cor_h_x`: backward-filtered target `dn = <x, h shifted>`, normalised (`sf` headroom).
@@ -802,15 +802,13 @@ fn beats(psk: i16, alpk: i16, sq: i16, alp: i16) -> bool {
     alpk as i32 * sq as i32 > psk as i32 * alp as i32
 }
 
-/// `search_2i40` (MR475/MR515) and MR59's search (`SAT`: saturating `ps`): 2 pulses, one block
-/// per track pair `[t0, t1]`, the 8 first pulses in lanes (`step5_block`), then the C's chain
+/// `search_2i40` (MR475/MR515) and MR59's search: 2 pulses, one block per track pair `[t0, t1]`, the 8 first pulses in lanes (`step5_block`), then the C's chain
 /// over the lanes' winners. Portable body of the dispatched `search_2i40`/`search_2i40_sat`.
 #[inline(always)]
-pub(crate) fn search_2i40_portable<const SAT: bool>(
+pub(crate) fn search_2i40_portable(
     dn: &[i16; L_CODE],
     rr: &RrTm,
     pairs: &[[usize; 2]],
-    _ov: &mut Flag,
 ) -> [usize; 2] {
     let dt = dn_tm(dn);
     let mut codvec = [0usize, 1];
@@ -841,7 +839,6 @@ pub(crate) fn search_3i40_portable(
     dn: &[i16; L_CODE],
     dn2: &[i16; L_CODE],
     rr: &RrTm,
-    ov: &mut Flag,
 ) -> [usize; 3] {
     let dt = dn_tm(dn);
     let mut codvec = [0usize, 1, 2];
@@ -862,20 +859,10 @@ pub(crate) fn search_3i40_portable(
         }
     }
     for (ipos, o, ix) in &blocks {
-        let (ipos, o, ix) = (*ipos, o, ix);
-        {
-            {
-                for l in 0..8 {
-                    if dn2[ipos[0] + STEP * l] < 0 {
-                        continue;
-                    }
-                    let (sq, alp) = (o.sq[l], o.alp[l]);
-                    let s = l_mult(alpk, sq, ov);
-                    if l_msu(s, psk, alp, ov) > 0 {
-                        (psk, alpk) = (sq, alp);
-                        codvec = core::array::from_fn(|p| ipos[p] + STEP * ix[p][l] as usize);
-                    }
-                }
+        for l in 0..8 {
+            if dn2[ipos[0] + STEP * l] >= 0 && beats(psk, alpk, o.sq[l], o.alp[l]) {
+                (psk, alpk) = (o.sq[l], o.alp[l]);
+                codvec = core::array::from_fn(|p| ipos[p] + STEP * ix[p][l] as usize);
             }
         }
     }
@@ -954,7 +941,6 @@ pub(crate) fn search_4i40_portable(
     dn: &[i16; L_CODE],
     dn2: &[i16; L_CODE],
     rr: &RrTm,
-    _ov: &mut Flag,
 ) -> [usize; 4] {
     let dt = dn_tm(dn);
     let none = Half {
@@ -1080,7 +1066,7 @@ pub(super) fn code_2i40_9bits(
         [STARTPOS[i] as usize, STARTPOS[i + 1] as usize]
     });
     cor_h_blocks(h, &dn_sign, &mut rr, &pairs.map(|[t0, t1]| [t1, t0]), ov);
-    let codvec = search_2i40(&dn, &rr, &pairs, ov);
+    let codvec = search_2i40(&dn, &rr, &pairs);
     // build_code
     let pt = &TRACKTABLE[sub_nr * 5..];
     code[..L_CODE].fill(0);
@@ -1145,7 +1131,7 @@ pub(super) fn code_2i40_11bits(
     set_sign(&mut dn, &mut dn_sign, &mut dn2, 8);
     cor_h_tm(h, &dn_sign, &mut rr, ov);
     let pairs: [[usize; 2]; 8] = core::array::from_fn(|k| [START_POS1[k / 4], START_POS2[k % 4]]);
-    let codvec = search_2i40_sat(&dn, &rr, &pairs, ov);
+    let codvec = search_2i40(&dn, &rr, &pairs);
     code[..L_CODE].fill(0);
     let mut indx: i16 = 0;
     let mut rsign: i16 = 0;
@@ -1225,7 +1211,7 @@ pub(super) fn code_3i40_14bits(
     cor_h_x(h, x, &mut dn, 1, ov);
     set_sign(&mut dn, &mut dn_sign, &mut dn2, 6);
     cor_h_tm(h, &dn_sign, &mut rr, ov);
-    let codvec = search_3i40(&dn, &dn2, &rr, ov);
+    let codvec = search_3i40(&dn, &dn2, &rr);
     code[..L_CODE].fill(0);
     let mut indx: i16 = 0;
     let mut rsign: i16 = 0;
@@ -1288,7 +1274,7 @@ pub(super) fn code_4i40_17bits(
     cor_h_x(h, x, &mut dn, 1, ov);
     set_sign(&mut dn, &mut dn_sign, &mut dn2, 4);
     cor_h_tm(h, &dn_sign, &mut rr, ov);
-    let codvec = search_4i40(&dn, &dn2, &rr, ov);
+    let codvec = search_4i40(&dn, &dn2, &rr);
     code[..L_CODE].fill(0);
     let mut indx: i16 = 0;
     let mut rsign: i16 = 0;

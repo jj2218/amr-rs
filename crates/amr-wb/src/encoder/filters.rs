@@ -3,8 +3,10 @@
 //! saturation where vo's plain C arithmetic wraps.
 
 use super::ops::*;
-use crate::cnst::{L_SUBFR16K, M, M16K};
+use crate::cnst::{L_SUBFR, M, M16K};
 use crate::enc_tables::LP_DEC2_H_FIR;
+pub(crate) use crate::simd::{convolve, residu, syn_filt};
+use crate::synthesis::wb_syn_filt;
 
 /// `Scale_sig`: `x = round(x << exp)`, saturating.
 pub(crate) fn scale_sig(x: &mut [i16], exp: i16) {
@@ -45,7 +47,37 @@ pub(crate) fn deemph2(x: &mut [i16], mu: i16, mem: &mut i16) {
 
 /// `Residu` (order 16): `y[i] = Σ a[j]·x[i-j]`; `x` holds 16 samples of history before
 /// position `at`, the outputs are `y[..lg]` for `x[at..at + lg]`.
-pub(crate) fn residu(a: &[i16], x: &[i16], at: usize, y: &mut [i16], lg: usize) {
+#[inline(always)]
+pub(crate) fn residu_portable(a: &[i16], x: &[i16], at: usize, y: &mut [i16], lg: usize) {
+    let a: &[i16; M + 1] = a[..=M].try_into().unwrap();
+    let x = &x[at - M..at + lg];
+    // every partial sum is at most 2·max|x|·Σ|a| in magnitude: below 2^31 the chain is the
+    // plain sum, and round(L_shl(s, 4)) one clamp of it
+    let sum_a: i64 = a.iter().map(|&c| (c as i32).abs() as i64).sum();
+    let max = x.iter().map(|&v| (v as i32).abs()).max().unwrap_or(0) as i64;
+    if 2 * max * sum_a < 1 << 31 {
+        let (yb, yr) = y[..lg].as_chunks_mut::<16>();
+        for (b, out) in yb.iter_mut().enumerate() {
+            let mut acc = [0i32; 16];
+            for (j, &c) in a.iter().enumerate() {
+                let w: &[i16; 16] = x[16 * b + M - j..16 * b + M - j + 16].try_into().unwrap();
+                for (s, &v) in acc.iter_mut().zip(w) {
+                    *s += c as i32 * v as i32;
+                }
+            }
+            for (o, s) in out.iter_mut().zip(acc) {
+                *o = ((((s as i64) << 5) + 0x8000) >> 16).clamp(-32768, 32767) as i16;
+            }
+        }
+        let n0 = 16 * yb.len();
+        for (k, o) in yr.iter_mut().enumerate() {
+            let n = M + n0 + k;
+            let s: i32 = (0..=M).map(|j| a[j] as i32 * x[n - j] as i32).sum();
+            *o = ((((s as i64) << 5) + 0x8000) >> 16).clamp(-32768, 32767) as i16;
+        }
+        return;
+    }
+    let (x, at) = (x, M);
     for i in 0..lg {
         let n = at + i;
         let mut s = l_mult(x[n], a[0]);
@@ -56,31 +88,47 @@ pub(crate) fn residu(a: &[i16], x: &[i16], at: usize, y: &mut [i16], lg: usize) 
     }
 }
 
-/// `Syn_filt` (order `a.len() - 1`, at most 20, `lg` at most 80): `y = x / A(z)`; `mem` the
-/// last outputs, updated if `update`. `x` and `y` may be one buffer: pass `x = None`.
-pub(crate) fn syn_filt(a: &[i16], x: Option<&[i16]>, y: &mut [i16], mem: &mut [i16], update: bool) {
+/// `Syn_filt` (order `a.len() - 1`, 16 or 20; `lg` at most 80, at least the order): `y = x /
+/// A(z)`; `mem` the last outputs, updated if `update`. `x` and `y` may be one buffer: pass
+/// `x = None`. The decoder's filter (the same chain, its block fast path).
+#[inline(always)]
+pub(crate) fn syn_filt_portable(
+    a: &[i16],
+    x: Option<&[i16]>,
+    y: &mut [i16],
+    mem: &mut [i16],
+    update: bool,
+) {
     let m = a.len() - 1;
-    let lg = y.len();
-    let mut yy = [0i16; L_SUBFR16K + M16K];
-    yy[..m].copy_from_slice(&mem[..m]);
-    let s = sub(norm_s(a[0]), 2);
-    let a0 = a[0] >> 1;
-    for i in 0..lg {
-        let xi = x.map_or(y[i], |x| x[i]);
-        let mut l = l_mult(xi, a0);
-        for j in 1..=m {
-            l = l_msu(l, a[j], yy[m + i - j]);
-        }
-        yy[m + i] = round(l_shl(l, add(3, s)));
-        y[i] = yy[m + i];
+    assert!(
+        y.len() >= m,
+        "Syn_filt: a block shorter than the order ({} < {m})",
+        y.len()
+    );
+    if let Some(x) = x {
+        y.copy_from_slice(&x[..y.len()]);
     }
     if update {
-        mem[..m].copy_from_slice(&yy[lg..lg + m]);
+        wb_syn_filt(a, y, &mut mem[..m]);
+    } else {
+        let mut copy = [0i16; M16K];
+        copy[..m].copy_from_slice(&mem[..m]);
+        wb_syn_filt(a, y, &mut copy[..m]);
     }
 }
 
 /// `Convolve`: `y[n] = Σ_{i<=n} x[i]·h[n-i]`, rounded.
-pub(crate) fn convolve(x: &[i16], h: &[i16], y: &mut [i16], l: usize) {
+#[inline(always)]
+pub(crate) fn convolve_portable(x: &[i16], h: &[i16], y: &mut [i16], l: usize) {
+    if l == L_SUBFR {
+        let (x, h): (&[i16; L_SUBFR], &[i16; L_SUBFR]) = (
+            x[..L_SUBFR].try_into().unwrap(),
+            h[..L_SUBFR].try_into().unwrap(),
+        );
+        if convolve_64(x, h, (&mut y[..L_SUBFR]).try_into().unwrap()) {
+            return;
+        }
+    }
     for n in 0..l {
         let mut s = 0i32;
         for i in 0..=n {
@@ -88,6 +136,37 @@ pub(crate) fn convolve(x: &[i16], h: &[i16], y: &mut [i16], l: usize) {
         }
         y[n] = round(s);
     }
+}
+
+/// `Convolve` on a subframe without the chain, if `max|x|·Σ|h| < 2^30`: then every partial
+/// `L_mac` sum is below 2^31 in magnitude, the chain is the plain sum `2s` (any order) and
+/// `round` of it is `clamp16((s + 2^14) >> 15)`. Returns false (nothing written) otherwise.
+#[inline(always)]
+fn convolve_64(x: &[i16; L_SUBFR], h: &[i16; L_SUBFR], y: &mut [i16; L_SUBFR]) -> bool {
+    const L: usize = L_SUBFR;
+    let max = x.iter().map(|&v| (v as i32).abs()).max().unwrap_or(0) as i64;
+    let sum: i64 = h.iter().map(|&v| (v as i32).abs()).sum::<i32>() as i64;
+    if max * sum >= 1 << 30 {
+        return false;
+    }
+    // outputs in blocks of 8 lanes, each adding x[i] times a window of h zero-padded in
+    // front (hp[L + k] = h[k]), so every block is one vector loop
+    let mut hp = [0i16; 2 * L];
+    hp[L..].copy_from_slice(h);
+    for (b, yb) in y.as_chunks_mut::<8>().0.iter_mut().enumerate() {
+        let n0 = 8 * b;
+        let mut acc = [0i32; 8];
+        for (i, &xi) in x[..n0 + 8].iter().enumerate() {
+            let w: &[i16; 8] = hp[L + n0 - i..L + n0 - i + 8].try_into().unwrap();
+            for (a, &hv) in acc.iter_mut().zip(w) {
+                *a = a.wrapping_add(xi as i32 * hv as i32);
+            }
+        }
+        for (yv, a) in yb.iter_mut().zip(acc) {
+            *yv = ((a + 0x4000) >> 15).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        }
+    }
+    true
 }
 
 /// `Updt_tar`: `x2 = x - gain·y` (gain Q14).

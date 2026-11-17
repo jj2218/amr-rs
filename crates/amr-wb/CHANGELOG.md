@@ -3,6 +3,13 @@
 One section per release, newest first. The release commit in the repository carries the
 section of each crate it releases.
 
+## 0.3.0 (2026-11-17)
+Changed
+- The encoder is about 1.4× the speed of vo-amrwbenc (was 0.46×): 1.43× on average, 1.34–1.54×
+  per mode. The output is unchanged (bit-exact on the whole 3GPP TS 26.174 encoder set and
+  against the 3GPP reference). On x86-64 CPUs with AVX2 its hot kernels use it, detected at
+  run time; other CPUs run the portable code.
+
 ## 0.2.0 (2026-11-16)
 Added
 - `Encoder`: AMR-WB (3GPP TS 26.173, ITU-T G.722.2) encoder in pure Rust, every mode, with

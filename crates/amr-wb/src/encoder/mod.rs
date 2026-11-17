@@ -11,6 +11,8 @@ mod bits;
 mod coder;
 mod dtx;
 mod filters;
+#[cfg(test)]
+mod kern;
 mod lpc;
 mod ops;
 mod pitch;
@@ -18,6 +20,19 @@ mod pitch_ol;
 mod preprocess;
 mod q_gain;
 mod vad;
+
+/// The portable bodies of the dispatched kernels (`crate::simd`).
+pub(crate) mod kernels {
+    pub(crate) use super::acelp2::{acelp_2t64_fx_portable, cor_h_x_portable};
+    pub(crate) use super::acelp4::acelp_4t64_fx_portable;
+    pub(crate) use super::filters::{convolve_portable, residu_portable, syn_filt_portable};
+    pub(crate) use super::lpc::{
+        autocorr_portable, az_isp_portable, qpisf_2s_36b_portable, qpisf_2s_46b_portable,
+    };
+    pub(crate) use super::pitch::pitch_fr4_portable;
+    pub(crate) use super::pitch_ol::pitch_med_ol_portable;
+    pub(crate) use super::preprocess::{NB_COEF_DOWN, decim_12k8_portable};
+}
 
 use crate::cnst::{EHF_MASK, L_FRAME16K, MAX_SERIAL_SIZE, Mode, RxFrameType};
 use crate::rfc4867::Frame;
@@ -107,6 +122,7 @@ impl Encoder {
     /// transmitted (a SID_FIRST frame's parameters are unused: [`crate::rfc4867`] writes them as
     /// zeros; a NO_DATA frame is not sent).
     pub fn encode(&mut self, mode: Mode, speech: &[i16; L_FRAME16K]) -> Frame {
+        crate::stages::start();
         let homing = speech.iter().all(|&s| s == EHF_MASK);
         let signal = speech.map(|s| s & !3);
         let mut prms = [0i16; MAX_SERIAL_SIZE];
@@ -118,11 +134,13 @@ impl Encoder {
         for (b, &p) in bits.iter_mut().zip(&prms[..n]) {
             *b = (p == BIT_1) as i16;
         }
-        Frame {
+        let frame = Frame {
             frame_type: self.frame_type(used == MRDTX).into(),
             mode,
             bits,
-        }
+        };
+        crate::stages::mark(crate::stages::E_TAIL);
+        frame
     }
 
     /// `Write_serial`'s TX frame type for a SID (`MRDTX`) or speech frame.

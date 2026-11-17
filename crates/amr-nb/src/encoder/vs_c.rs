@@ -2005,10 +2005,9 @@ mod kernels {
                 }
             }
             let rt: RrTm = tm(&rr);
-            let mut ov = false;
-            let got = crate::simd::search_4i40(&dn, &dn2, &rt, &mut ov);
+            let got = crate::simd::search_4i40(&dn, &dn2, &rt);
             assert_eq!(got, want, "case {case} valid {valid:?}");
-            let got = search_4i40_portable(&dn, &dn2, &rt, &mut ov);
+            let got = search_4i40_portable(&dn, &dn2, &rt);
             assert_eq!(got, want, "case {case} portable, valid {valid:?}");
         }
         assert!(
@@ -3558,11 +3557,11 @@ mod kernels {
             .collect();
         time("search_3i40", |i| {
             let (dn, dn2, rt) = bb(&s5[i]);
-            bb(crate::simd::search_3i40(dn, dn2, rt, &mut Flag::default()));
+            bb(crate::simd::search_3i40(dn, dn2, rt));
         });
         time("search_4i40", |i| {
             let (dn, dn2, rt) = bb(&s5[i]);
-            bb(crate::simd::search_4i40(dn, dn2, rt, &mut Flag::default()));
+            bb(crate::simd::search_4i40(dn, dn2, rt));
         });
         // MR102's cor_h + search (one kernel) on the search inputs' h and signs.
         let sins: Vec<_> = (0..64)

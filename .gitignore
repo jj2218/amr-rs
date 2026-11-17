@@ -3,4 +3,4 @@
 /fuzz/artifacts/
 /fuzz/corpus/
 # Downloaded oracles: 3GPP vectors and reference C ("all rights reserved"), opencore-amr. Never commit.
-/.cache/
+/.cache

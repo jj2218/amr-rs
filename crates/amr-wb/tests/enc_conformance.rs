@@ -64,7 +64,7 @@ fn frames(w: &[i16]) -> Vec<&[i16]> {
 /// Runs `encode` on every case; prints one summary line and the failing names. Frame-sync
 /// cases (TS 26.174, as TS 26.074 §8.2) compare the 2nd frame after the last decoder homing
 /// frame, the output for an all-0x0008 input frame.
-fn run(label: &str, encode: impl Fn(&EncCase) -> Vec<i16>) -> Vec<String> {
+fn run(label: &str, encode: impl Fn(&EncCase) -> Vec<i16> + Sync, threads: usize) -> Vec<String> {
     let cases = enc_cases();
     let dhf: Vec<Vec<i16>> = (0..9)
         .map(|m| {
@@ -78,8 +78,7 @@ fn run(label: &str, encode: impl Fn(&EncCase) -> Vec<i16>) -> Vec<String> {
             })
         })
         .collect();
-    let mut failing = Vec::new();
-    for c in &cases {
+    let check = |c: &EncCase| {
         let mut got = encode(c);
         if c.sync {
             let f = frames(&got);
@@ -88,10 +87,28 @@ fn run(label: &str, encode: impl Fn(&EncCase) -> Vec<i16>) -> Vec<String> {
                 .and_then(|i| f.get(i + 2))
                 .map_or(Vec::new(), |f| f.to_vec());
         }
-        if let Some(f) = first_diff(&got, &c.expected) {
-            failing.push(format!("{} (frame {f})", c.name));
-        }
-    }
+        first_diff(&got, &c.expected).map(|f| format!("{} (frame {f})", c.name))
+    };
+    // cases are independent: in `threads` interleaved shares (failures listed in case order)
+    let mut failing: Vec<(usize, String)> = std::thread::scope(|sc| {
+        let workers: Vec<_> = (0..threads)
+            .map(|t| {
+                let (cases, check) = (&cases, &check);
+                sc.spawn(move || {
+                    (t..cases.len())
+                        .step_by(threads)
+                        .filter_map(|i| check(&cases[i]).map(|f| (i, f)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap())
+            .collect()
+    });
+    failing.sort();
+    let failing: Vec<String> = failing.into_iter().map(|(_, f)| f).collect();
     println!(
         "{label}: {}/{} TS 26.174 encoder vectors bit-exact",
         cases.len() - failing.len(),
@@ -137,18 +154,23 @@ fn bit_sync(label: &str, encode: impl Fn(&EncCase) -> Vec<i16>) -> Vec<String> {
     failing
 }
 
-/// The harness itself: the reference must reproduce every vector. vo-amrwbenc's count is
-/// reported (it predates CR 26.173-0032 and -0036), not asserted.
+/// The harness itself: the reference must reproduce every vector (one thread: the reference
+/// keeps a global overflow flag).
 #[test]
-fn c_encoders_on_vectors() {
-    let mut failing = run("ref26173 encoder (C reference)", encode_ref);
+fn reference_encoder_on_vectors() {
+    let mut failing = run("ref26173 encoder (C reference)", encode_ref, 1);
     failing.extend(bit_sync("ref26173 encoder (C reference)", encode_ref));
-    let _ = run("vo-amrwbenc (C baseline)", encode_vo);
-    let _ = bit_sync("vo-amrwbenc (C baseline)", encode_vo);
     assert!(
         failing.is_empty(),
         "the reference must reproduce every vector: {failing:?}"
     );
+}
+
+/// vo-amrwbenc's count is reported (it predates CR 26.173-0032 and -0036), not asserted.
+#[test]
+fn vo_amrwbenc_on_vectors() {
+    let _ = run("vo-amrwbenc (C baseline)", encode_vo, 1);
+    let _ = bit_sync("vo-amrwbenc (C baseline)", encode_vo);
 }
 
 fn encode_rust(case: &EncCase) -> Vec<i16> {
@@ -163,7 +185,8 @@ fn encode_rust(case: &EncCase) -> Vec<i16> {
 /// The Rust encoder on every TS 26.174 vector, and bit synchronisation.
 #[test]
 fn rust_encoder_on_vectors() {
-    let mut failing = run("amr-wb encoder (Rust)", encode_rust);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
+    let mut failing = run("amr-wb encoder (Rust)", encode_rust, threads);
     failing.extend(bit_sync("amr-wb encoder (Rust)", encode_rust));
     assert!(failing.is_empty(), "{} failing: {failing:?}", failing.len());
 }

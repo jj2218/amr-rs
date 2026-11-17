@@ -565,14 +565,12 @@ kernels! {
         avx2 cb::cor_h_search_8i40_portable::<16, false, true>;
     /// The step-5 searches (see `search_2i40_portable`, `search_3i40_portable`,
     /// `search_4i40_portable`).
-    pub(crate) fn search_2i40(dn: &[i16; cb::L_CODE], rr: &RrTm, pairs: &[[usize; 2]],
-        ov: &mut Flag) -> [usize; 2] = cb::search_2i40_portable::<false>;
-    pub(crate) fn search_2i40_sat(dn: &[i16; cb::L_CODE], rr: &RrTm, pairs: &[[usize; 2]],
-        ov: &mut Flag) -> [usize; 2] = cb::search_2i40_portable::<true>;
-    pub(crate) fn search_3i40(dn: &[i16; cb::L_CODE], dn2: &[i16; cb::L_CODE], rr: &RrTm,
-        ov: &mut Flag) -> [usize; 3] = cb::search_3i40_portable;
-    pub(crate) fn search_4i40(dn: &[i16; cb::L_CODE], dn2: &[i16; cb::L_CODE], rr: &RrTm,
-        ov: &mut Flag) -> [usize; 4] = cb::search_4i40_portable;
+    pub(crate) fn search_2i40(dn: &[i16; cb::L_CODE], rr: &RrTm, pairs: &[[usize; 2]])
+        -> [usize; 2] = cb::search_2i40_portable;
+    pub(crate) fn search_3i40(dn: &[i16; cb::L_CODE], dn2: &[i16; cb::L_CODE], rr: &RrTm)
+        -> [usize; 3] = cb::search_3i40_portable;
+    pub(crate) fn search_4i40(dn: &[i16; cb::L_CODE], dn2: &[i16; cb::L_CODE], rr: &RrTm)
+        -> [usize; 4] = cb::search_4i40_portable;
     /// `cor_h_x`'s correlations (see `corr_hx_portable`).
     pub(crate) fn corr_hx(h: &[i16], x: &[i16]) -> [i32; cb::L_CODE] = cb::corr_hx_portable;
     /// The filtered codevector (see `filtered_code_portable`).

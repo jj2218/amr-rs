@@ -208,8 +208,9 @@ pub(crate) fn wb_syn_filt(a: &[i16], xy: &mut [i16], mem: &mut [i16]) {
     yy[..m].copy_from_slice(mem);
     let sum_a: i64 = a[1..].iter().map(|&c| (c as i64).abs()).sum();
     let fixed = 2 * max_abs(xy) * (a0 as i64).abs();
-    if lg == L_SUBFR16K && fixed + 2 * max_abs(mem) * sum_a < 1 << 31 {
-        let x: [i16; L_SUBFR16K] = xy.try_into().unwrap();
+    if lg.is_multiple_of(B) && lg <= L_SUBFR16K && fixed + 2 * max_abs(mem) * sum_a < 1 << 31 {
+        let mut x = [0i16; L_SUBFR16K];
+        x[..lg].copy_from_slice(xy);
         match m {
             M => wb_syn_fast::<M>(a, a0, s, xy, &mut yy),
             M16K => wb_syn_fast::<M16K>(a, a0, s, xy, &mut yy),
@@ -220,7 +221,7 @@ pub(crate) fn wb_syn_filt(a: &[i16], xy: &mut [i16], mem: &mut [i16]) {
             mem.copy_from_slice(&xy[lg - m..]);
             return;
         }
-        xy.copy_from_slice(&x);
+        xy.copy_from_slice(&x[..lg]);
     }
     for n in 0..lg {
         let mut l = mul_16by16_to_int32(xy[n], a0);
@@ -236,7 +237,13 @@ pub(crate) fn wb_syn_filt(a: &[i16], xy: &mut [i16], mem: &mut [i16]) {
 
 /// `wb_syn_filt`'s fast path at order `N` (`yy` holds the memory, then the outputs; `xy` a
 /// multiple of B long): blocks of B outputs as in `syn32_fast`.
-fn wb_syn_fast<const N: usize>(a: &[i16], a0: i16, s: i16, xy: &mut [i16], yy: &mut [i16]) {
+pub(crate) fn wb_syn_fast<const N: usize>(
+    a: &[i16],
+    a0: i16,
+    s: i16,
+    xy: &mut [i16],
+    yy: &mut [i16],
+) {
     let c = hist_coefs::<N>(a);
     let a2: [i32; B] = std::array::from_fn(|k| 2 * a[k] as i32);
     for (n0, xb) in (0..).step_by(B).zip(xy.as_chunks_mut::<B>().0) {

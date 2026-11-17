@@ -31,8 +31,8 @@ Measured, with the recipe that reproduces each number, in
   frames, every mode, mode switching and DTX. opencore-amr gets 189/221.
 - **Encoder bit-exact on the whole TS 26.174 encoder set**: 3,101/3,101 cases (every mode,
   DTX, mode switching, frame and bit synchronisation), with the two encoder changes since
-  vo-amrwbenc (CR 26.173-0032 and -0036). vo-amrwbenc gets 3,006/3,101. The encoder is not yet
-  tuned for speed: about half vo-amrwbenc's.
+  vo-amrwbenc (CR 26.173-0032 and -0036). vo-amrwbenc gets 3,006/3,101.
+- **Encoder 1.43× the speed of vo-amrwbenc** (1.34–1.54× per mode).
 - **Differentially tested against the TS 26.173 reference C**: the whole decoder on 1,600
   stress streams (corrupted and random bits, bad, lost and degraded frames, SID and NO_DATA
   sequences, mode switching), the whole encoder on 64 stress streams (speech up to clipping,

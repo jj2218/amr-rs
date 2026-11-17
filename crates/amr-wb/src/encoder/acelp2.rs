@@ -4,20 +4,20 @@
 use super::ops::*;
 use crate::basic_op::dot_product12;
 use crate::cnst::L_SUBFR;
+pub(crate) use crate::simd::{acelp_2t64_fx, cor_h_x};
 
 /// `cor_h_x`: `dn[i] = Σ x[j]·h[j-i]`, scaled together so the codebook search stays in 12 bits.
-pub(crate) fn cor_h_x(h: &[i16], x: &[i16], dn: &mut [i16; L_SUBFR]) {
-    let mut y32 = [0i32; L_SUBFR];
+#[inline(always)]
+pub(crate) fn cor_h_x_portable(h: &[i16], x: &[i16], dn: &mut [i16; L_SUBFR]) {
+    let y32 = corr_hx(
+        h[..L_SUBFR].try_into().unwrap(),
+        x[..L_SUBFR].try_into().unwrap(),
+    );
     let mut l_tot = 1i32;
     for k in 0..4 {
         let mut l_max = 0i32;
         for i in (k..L_SUBFR).step_by(4) {
-            let mut l = 1i32;
-            for j in i..L_SUBFR {
-                l = l_mac(l, x[j], h[j - i]);
-            }
-            y32[i] = l;
-            l_max = l_max.max(l_abs(l));
+            l_max = l_max.max(l_abs(y32[i]));
         }
         let l_max = l_shr(l_max, 2);
         l_tot = l_add(l_tot, l_max);
@@ -29,12 +29,41 @@ pub(crate) fn cor_h_x(h: &[i16], x: &[i16], dn: &mut [i16; L_SUBFR]) {
     }
 }
 
+/// `cor_h_x`'s chains `1 + Σ_{j>=i} 2·x[j]·h[j-i]`: plain fixed-length dots over x
+/// zero-padded to two subframes when exact (every partial sum is at most
+/// `sqrt(Σx²·Σh²)` in magnitude, Cauchy–Schwarz: below 2^30 no step saturates), else the chain.
+#[inline(always)]
+fn corr_hx(h: &[i16; L_SUBFR], x: &[i16; L_SUBFR]) -> [i32; L_SUBFR] {
+    let e = |v: &[i16; L_SUBFR]| v.iter().map(|&s| s as i64 * s as i64).sum::<i64>();
+    const B: i128 = (1 << 30) - 1;
+    if e(x) as i128 * e(h) as i128 <= B * B {
+        let mut xp = [0i16; 2 * L_SUBFR];
+        xp[..L_SUBFR].copy_from_slice(x);
+        return std::array::from_fn(|i| {
+            let w: &[i16; L_SUBFR] = xp[i..i + L_SUBFR].try_into().unwrap();
+            let mut s = 0i32;
+            for j in 0..L_SUBFR {
+                s = s.wrapping_add(h[j] as i32 * w[j] as i32);
+            }
+            1 + (s << 1)
+        });
+    }
+    std::array::from_fn(|i| {
+        let mut l = 1i32;
+        for j in i..L_SUBFR {
+            l = l_mac(l, x[j], h[j - i]);
+        }
+        l
+    })
+}
+
 const NB_POS2: usize = 32;
 const MSIZE2: usize = 1024;
 
 /// `ACELP_2t64_fx`: two pulses on two interleaved tracks of 32 positions (12-bit index);
 /// `code` the codevector (Q9), `y` it filtered (Q9). `dn` gets the signs folded in.
-pub(crate) fn acelp_2t64_fx(
+#[inline(always)]
+pub(crate) fn acelp_2t64_fx_portable(
     dn: &mut [i16; L_SUBFR],
     cn: &[i16],
     hh: &[i16],
@@ -76,11 +105,70 @@ pub(crate) fn acelp_2t64_fx(
     }
     let hp = &h[L_SUBFR..];
     let mut rrixix = [[0i16; NB_POS2]; 2];
+    let mut rrixiy = [0i16; MSIZE2];
+    // every chain's partial sums are at most 0x10000 + 2Σh² in magnitude (Cauchy–Schwarz on
+    // the diagonals): below 2^31 none saturates and the same loops run on plain adds
+    let hh: i64 = hp.iter().map(|&v| v as i64 * v as i64).sum();
+    if 0x1_0000 + 2 * hh <= i32::MAX as i64 {
+        cor_h2::<true>(hp, &mut rrixix, &mut rrixiy);
+    } else {
+        cor_h2::<false>(hp, &mut rrixix, &mut rrixiy);
+    }
+    // the odd positions' sign and its inverse (vec) contiguous: rows of 32 lanes
+    let sy: [i16; NB_POS2] = std::array::from_fn(|n| sign[2 * n + 1]);
+    let vy: [i16; NB_POS2] = std::array::from_fn(|n| vec[2 * n + 1]);
+    for (n, row) in rrixiy.as_chunks_mut::<NB_POS2>().0.iter_mut().enumerate() {
+        let psign = if sign[2 * n] < 0 { &vy } else { &sy };
+        for (r, &s) in row.iter_mut().zip(psign) {
+            *r = mult(*r, s);
+        }
+    }
+    let (ix, iy) =
+        search_2t(dn, &rrixix, &rrixiy).unwrap_or_else(|| search_2t_chain(dn, &rrixix, &rrixiy));
+    code.fill(0);
+    let (mut i0, mut i1) = ((ix >> 1) as i16, (iy >> 1) as i16);
+    let p0: &[i16] = if sign[ix] > 0 {
+        code[ix] = 512;
+        &h[L_SUBFR - ix..]
+    } else {
+        code[ix] = -512;
+        i0 += NB_POS2 as i16;
+        &h_inv[L_SUBFR - ix..]
+    };
+    let p1: &[i16] = if sign[iy] > 0 {
+        code[iy] = 512;
+        &h[L_SUBFR - iy..]
+    } else {
+        code[iy] = -512;
+        i1 += NB_POS2 as i16;
+        &h_inv[L_SUBFR - iy..]
+    };
+    *index = add(shl(i0, 6), i1);
+    for i in 0..L_SUBFR {
+        y[i] = shr_r(add(p0[i], p1[i]), 3);
+    }
+}
+
+/// The C's `rrixix` and `rrixiy` chains of the 2-track search; `PLAIN`: their adds without
+/// saturation (exact when the caller's bound holds).
+#[inline(always)]
+fn cor_h2<const PLAIN: bool>(
+    hp: &[i16],
+    rrixix: &mut [[i16; NB_POS2]; 2],
+    rrixiy: &mut [i16; MSIZE2],
+) {
+    let mac = |c: i32, a: i16, b: i16| {
+        if PLAIN {
+            c.wrapping_add((a as i32 * b as i32).wrapping_mul(2))
+        } else {
+            l_mac(c, a, b)
+        }
+    };
     let mut cor = 0x0001_0000i32;
     for i in 0..NB_POS2 {
-        cor = l_mac(cor, hp[2 * i], hp[2 * i]);
+        cor = mac(cor, hp[2 * i], hp[2 * i]);
         rrixix[1][NB_POS2 - 1 - i] = extract_h(cor);
-        cor = l_mac(cor, hp[2 * i + 1], hp[2 * i + 1]);
+        cor = mac(cor, hp[2 * i + 1], hp[2 * i + 1]);
         rrixix[0][NB_POS2 - 1 - i] = extract_h(cor);
     }
     for r in rrixix.iter_mut() {
@@ -88,7 +176,6 @@ pub(crate) fn acelp_2t64_fx(
             *v >>= 1;
         }
     }
-    let mut rrixiy = [0i16; MSIZE2];
     for k in 0..NB_POS2 {
         let (mut p1, mut p0) = (
             (MSIZE2 - 1 - k * NB_POS2) as isize,
@@ -97,28 +184,29 @@ pub(crate) fn acelp_2t64_fx(
         let mut cor = 0x8000i32;
         let (mut a, mut b) = (0usize, 1 + 2 * k);
         for _ in k + 1..NB_POS2 {
-            cor = l_mac(cor, hp[a], hp[b]);
+            cor = mac(cor, hp[a], hp[b]);
             a += 1;
             b += 1;
             rrixiy[p1 as usize] = extract_h(cor);
-            cor = l_mac(cor, hp[a], hp[b]);
+            cor = mac(cor, hp[a], hp[b]);
             a += 1;
             b += 1;
             rrixiy[p0 as usize] = extract_h(cor);
             p1 -= NB_POS2 as isize + 1;
             p0 -= NB_POS2 as isize + 1;
         }
-        cor = l_mac(cor, hp[a], hp[b]);
+        cor = mac(cor, hp[a], hp[b]);
         rrixiy[p1 as usize] = extract_h(cor);
     }
-    let mut p0 = 0;
-    for i in (0..L_SUBFR).step_by(2) {
-        let psign = if sign[i] < 0 { &vec } else { &sign };
-        for j in (1..L_SUBFR).step_by(2) {
-            rrixiy[p0] = mult(rrixiy[p0], psign[j]);
-            p0 += 1;
-        }
-    }
+}
+
+/// The 2-track pair search as the C's chain: (ix, iy).
+#[inline(always)]
+fn search_2t_chain(
+    dn: &[i16; L_SUBFR],
+    rrixix: &[[i16; NB_POS2]; 2],
+    rrixiy: &[i16; MSIZE2],
+) -> (usize, usize) {
     let (mut psk, mut alpk) = (-1i16, 1i16);
     let (mut ix, mut iy) = (0usize, 1usize);
     let mut p2 = 0;
@@ -143,28 +231,54 @@ pub(crate) fn acelp_2t64_fx(
             iy = p;
         }
     }
-    code.fill(0);
-    let (mut i0, mut i1) = ((ix >> 1) as i16, (iy >> 1) as i16);
-    let p0: &[i16] = if sign[ix] > 0 {
-        code[ix] = 512;
-        &h[L_SUBFR - ix..]
-    } else {
-        code[ix] = -512;
-        i0 += NB_POS2 as i16;
-        &h_inv[L_SUBFR - ix..]
-    };
-    let p1: &[i16] = if sign[iy] > 0 {
-        code[iy] = 512;
-        &h[L_SUBFR - iy..]
-    } else {
-        code[iy] = -512;
-        i1 += NB_POS2 as i16;
-        &h_inv[L_SUBFR - iy..]
-    };
-    *index = add(shl(i0, 6), i1);
-    for i in 0..L_SUBFR {
-        y[i] = shr_r(add(p0[i], p1[i]), 3);
+    (ix, iy)
+}
+
+/// The 2-track pair search in lanes: as `search_ixiy` (the 4-track search), with every
+/// `alp2 > 0` the C's chain keeps the first maximum of `sq/alp2` in (i0, i1) order; rows of 32
+/// i1 lanes, each lane's first best over the rows, the lanes reduced in order. `None` if some
+/// `alp2 <= 0` (then the chain decides).
+#[inline(always)]
+fn search_2t(
+    dn: &[i16; L_SUBFR],
+    rrixix: &[[i16; NB_POS2]; 2],
+    rrixiy: &[i16; MSIZE2],
+) -> Option<(usize, usize)> {
+    let dn1: [i16; NB_POS2] = std::array::from_fn(|n| dn[2 * n + 1]);
+    let (mut bsq, mut bal, mut bx) = ([-1i32; NB_POS2], [1i32; NB_POS2], [0usize; NB_POS2]);
+    for n0 in 0..NB_POS2 {
+        let ps1 = dn[2 * n0];
+        let alp1 = rrixix[0][n0];
+        let row: &[i16; NB_POS2] = rrixiy[NB_POS2 * n0..NB_POS2 * (n0 + 1)].try_into().unwrap();
+        let (mut sq, mut al) = ([0i32; NB_POS2], [0i32; NB_POS2]);
+        let mut min_al = i32::MAX;
+        for n in 0..NB_POS2 {
+            let ps2 = ps1.saturating_add(dn1[n]);
+            al[n] = alp1.saturating_add(rrixix[1][n].saturating_add(row[n])) as i32;
+            sq[n] = mult(ps2, ps2) as i32;
+            min_al = min_al.min(al[n]);
+        }
+        if min_al <= 0 {
+            return None;
+        }
+        for n in 0..NB_POS2 {
+            // 15-bit, non-negative: the cross products fit an i32
+            if sq[n] * bal[n] > bsq[n] * al[n] {
+                bsq[n] = sq[n];
+                bal[n] = al[n];
+                bx[n] = n0;
+            }
+        }
     }
+    // every lane took row 0's candidate at least (sq >= 0 > -alp): reduce in order
+    let (mut sqk, mut alpk, mut kx, mut ky) = (bsq[0], bal[0], bx[0], 0);
+    for n in 1..NB_POS2 {
+        let (l, r) = (bsq[n] * alpk, sqk * bal[n]);
+        if l > r || l == r && bx[n] < kx {
+            (sqk, alpk, kx, ky) = (bsq[n], bal[n], bx[n], n);
+        }
+    }
+    Some((2 * kx, 2 * ky + 1))
 }
 
 #[cfg(test)]

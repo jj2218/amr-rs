@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # CRATE=<crate> (default amr-nb): which codec. Build its benchmark once and run it pinned to one core (less noise on laptops).
 # BENCH=kern: ns per call of the hot encoder kernels, Rust vs C (an ignored lib test).
-# AB=<git ref>: that ref (A) vs the working tree (B), interleaved runs of the "all" line
+# AB=<git ref>: that ref (A) vs the working tree (B; B=<git ref>: that ref instead, e.g. two
+# `git stash create` snapshots of consecutive steps), interleaved runs of the "all" line
 # (BENCH=enc by default; BENCH_MODE=<mode> runs and compares only that mode, e.g. 122); the C drifts
 # with temperature, so judge by the Rust/C ratio. BENCH_MODE=each: every mode in one run, then
 # the median ratio per mode for A and B (B/A > 1: B faster).
@@ -29,12 +30,22 @@ build() { cargo bench -p "$crate" --bench codec --no-run 2>&1 | sed -n 's/.*Exec
 kern() { taskset -c "${BENCH_CPU:-2}" cargo test -q --release -p "$crate" --lib kernel_timing \
     -- --ignored --nocapture 2>&1 | grep -E " ns$|error|panicked"; }
 if [ -n "${AB:-}" ]; then
+    # best of 3 reps per run: the A/B takes the median of 3 interleaved runs (15: ~50 min)
+    export BENCH_REPS=${BENCH_REPS:-3}
     src=target/ab-src
     git worktree remove --force "$src" 2>/dev/null || rm -rf "$src"
     git worktree add -q --detach "$src" "$AB"
     trap 'git worktree remove --force "$src"' EXIT
     ln -s "$PWD/.cache" "$src/.cache"
+    if [ -n "${B:-}" ]; then
+        bsrc=target/ab-src-b
+        git worktree remove --force "$bsrc" 2>/dev/null || rm -rf "$bsrc"
+        git worktree add -q --detach "$bsrc" "$B"
+        trap 'git worktree remove --force "$src"; git worktree remove --force "$bsrc"' EXIT
+        ln -s "$PWD/.cache" "$bsrc/.cache"
+    fi
     if [ "${BENCH:-}" = kern ]; then
+        [ -z "${B:-}" ] || { echo "bench: B=<ref> is not supported with BENCH=kern (side B is the working tree)" >&2; exit 1; }
         for r in 1 2 3; do
             a=$(cd "$src" && CARGO_TARGET_DIR="$OLDPWD/$ab" kern) \
                 || { echo "bench: $AB has no kernel_timing test (or it failed)" >&2; exit 1; }
@@ -53,9 +64,13 @@ if [ -n "${AB:-}" ]; then
         exit
     fi
     abs() { case "$1" in /*) echo "$1" ;; *) echo "$2/$1" ;; esac; }
-    b=$(abs "$(build)" "$PWD")
+    if [ -n "${B:-}" ]; then
+        b=$(abs "$(cd "$bsrc" && CARGO_TARGET_DIR="$OLDPWD/$ab-b" build)" "$PWD/$bsrc")
+    else
+        b=$(abs "$(build)" "$PWD")
+    fi
     a=$(abs "$(cd "$src" && CARGO_TARGET_DIR="$OLDPWD/$ab" build)" "$PWD/$src")
-    [ -f "$a" ] && [ -x "$a" ] && [ -f "$b" ] || { echo "bench: AB build failed (does $AB have the codec bench?)" >&2; exit 1; }
+    [ -f "$a" ] && [ -x "$a" ] && [ -f "$b" ] || { echo "bench: AB build failed (does ${B:+$B or }$AB have the codec bench?)" >&2; exit 1; }
     if [ "${BENCH_MODE:-}" = each ]; then
         for r in 1 2 3; do for v in A B; do
             exe=$a; [ $v = B ] && exe=$b

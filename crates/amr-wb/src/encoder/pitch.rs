@@ -2,11 +2,12 @@
 //! (`gpclip.c`, with CR 26.173-0032's 6.60/8.85 thresholds, which vo predates), with the
 //! reference's saturation.
 
-use super::filters::convolve;
+use super::filters::convolve_portable as convolve;
 use super::ops::*;
 use crate::basic_op::dot_product12;
 use crate::cnst::{L_SUBFR, M, NBBITS_7K, NBBITS_9K, PIT_MIN};
 use crate::enc_tables::INTER4_1;
+pub(crate) use crate::simd::pitch_fr4;
 
 const UP_SAMP: i16 = 4;
 const L_INTERPOL1: usize = 4;
@@ -14,7 +15,8 @@ const L_INTERPOL1: usize = 4;
 /// `Pitch_fr4`: the closed-loop lag in [`t0_min`, `t0_max`] (integer search on the normalised
 /// correlation, then fractions: 1/4 below `t0_fr2`, 1/2 below `t0_fr1`); `exc` is the
 /// excitation with its past before `at`. Returns the lag; `pit_frac` its fraction.
-pub(crate) fn pitch_fr4(
+#[inline(always)]
+pub(crate) fn pitch_fr4_portable(
     exc: &[i16],
     at: usize,
     xn: &[i16],
@@ -31,7 +33,8 @@ pub(crate) fn pitch_fr4(
     let t_max = t0_max + L_INTERPOL1 as i16;
     // corr_v[t - t_min] for t in [t_min, t_max]
     let mut corr_v = [0i16; 40];
-    norm_corr(exc, at, xn, h, l_subfr, t_min, t_max, &mut corr_v);
+    assert_eq!(l_subfr, L_SUBFR, "Pitch_fr4: the encoder's subframe");
+    norm_corr(exc, at, xn, h, t_min, t_max, &mut corr_v);
     let c = |t: i16| (t - t_min) as usize;
     let mut max = corr_v[c(t0_min)];
     let mut t0 = t0_min;
@@ -73,39 +76,41 @@ pub(crate) fn pitch_fr4(
 
 /// `Norm_Corr`: the normalised correlation of `xn` with the filtered past excitation at each
 /// lag in [`t_min`, `t_max`] (into `corr_norm[t - t_min]`).
+#[inline(always)]
 fn norm_corr(
     exc: &[i16],
     at: usize,
     xn: &[i16],
     h: &[i16],
-    l_subfr: usize,
     t_min: i16,
     t_max: i16,
     corr_norm: &mut [i16],
 ) {
+    let xn: &[i16; L_SUBFR] = xn[..L_SUBFR].try_into().unwrap();
     let mut k = at - t_min as usize;
     let mut excf = [0i16; L_SUBFR];
-    convolve(&exc[k..], h, &mut excf, l_subfr);
+    convolve(&exc[k..], h, &mut excf, L_SUBFR);
     let mut l = 1i32;
-    for &x in &xn[..l_subfr] {
+    for &x in xn {
         l = l_mac(l, x, x);
     }
     let exp = add(sub(30, norm_l(l)), 2);
     let scale = negate(shr(exp, 1));
+    let exx: i64 = xn.iter().map(|&x| x as i64 * x as i64).sum();
     for t in t_min..=t_max {
-        let mut l = 1i32;
-        for i in 0..l_subfr {
-            l = l_mac(l, xn[i], excf[i]);
-        }
+        let (lc, le) = dots_64(xn, &excf, exx);
+        let l = lc.unwrap_or_else(|| {
+            let mut l = 1i32;
+            for i in 0..L_SUBFR {
+                l = l_mac(l, xn[i], excf[i]);
+            }
+            l
+        });
         let exp = norm_l(l);
         let corr = extract_h(l_shl(l, exp));
         let exp_corr = sub(30, exp);
-        let mut l = 1i32;
-        for &e in &excf[..l_subfr] {
-            l = l_mac(l, e, e);
-        }
-        let exp = norm_l(l);
-        let mut l = l_shl(l, exp);
+        let exp = norm_l(le);
+        let mut l = l_shl(le, exp);
         let mut exp_norm = sub(30, exp);
         isqrt_n(&mut l, &mut exp_norm);
         let norm = extract_h(l);
@@ -113,12 +118,33 @@ fn norm_corr(
         corr_norm[(t - t_min) as usize] = round(l_shl(l, add(add(exp_corr, exp_norm), scale)));
         if t != t_max {
             k -= 1;
-            for i in (1..l_subfr).rev() {
-                excf[i] = add(mult(exc[k], h[i]), excf[i - 1]);
+            // each output reads only the previous lag's excf (one vector pass)
+            let (e, old) = (exc[k], excf);
+            for i in 1..L_SUBFR {
+                excf[i] = add(mult(e, h[i]), old[i - 1]);
             }
-            excf[0] = mult(exc[k], h[0]);
+            excf[0] = mult(e, h[0]);
         }
     }
+}
+
+/// `Norm_Corr`'s two `L_mac` chains from 1 over a subframe, `1 + 2Σ x·e` and `1 + 2Σ e²`,
+/// without the chain where exact (`exx` = Σx²): the energy's terms are ≥ 0, so its chain is
+/// `min(1 + 2Σe², MAX_32)`; the correlation's partial sums are at most `1 + 2·sqrt(exx·Σe²)`
+/// (Cauchy–Schwarz) in magnitude, so below 2^31 the chain is the plain sum. `None`: the chain.
+#[inline(always)]
+fn dots_64(x: &[i16; L_SUBFR], e: &[i16; L_SUBFR], exx: i64) -> (Option<i32>, i32) {
+    // wrapping: exact whenever it is used (|Σ x·e| < 2^30 then)
+    let mut sxe = 0i32;
+    let mut see = 0i64;
+    for j in 0..L_SUBFR {
+        sxe = sxe.wrapping_add(x[j] as i32 * e[j] as i32);
+        see += (e[j] as i32 * e[j] as i32) as i64;
+    }
+    let le = (1 + 2 * see).min(i32::MAX as i64) as i32;
+    const B: i128 = (1 << 30) - 1;
+    let lc = ((exx as i128) * (see as i128) <= B * B).then(|| 1 + 2 * sxe);
+    (lc, le)
 }
 
 /// `Interpol_4`: `x` interpolated at `pos + frac/4` (frac in -4..=3).

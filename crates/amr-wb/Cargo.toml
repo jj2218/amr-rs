@@ -1,6 +1,6 @@
 [package]
 name = "amr-wb"
-version = "0.2.0"
+version = "0.3.0"
 description = "Pure-Rust, bit-exact AMR-WB (3GPP TS 26.173, ITU-T G.722.2) speech decoder and encoder"
 keywords = ["amr-wb", "speech", "codec", "audio", "3gpp"]
 categories = ["multimedia::audio", "multimedia::encoding", "encoding"]

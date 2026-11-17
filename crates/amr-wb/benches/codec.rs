@@ -91,7 +91,7 @@ fn main() {
         {
             let ns = amr_wb::stages::take();
             let per = (frames * reps()) as f64 * 1e3;
-            let cols: String = ns
+            let cols: String = ns[..amr_wb::stages::NAMES.len()]
                 .iter()
                 .map(|&v| format!(" {:>11.2}", v as f64 / per))
                 .collect();
@@ -129,12 +129,23 @@ fn main() {
     if std::env::var("BENCH_MODE").is_err() {
         row("all", tr, tc, tn);
     }
+    // `BENCH=stages`: the encoder's stages too
+    #[cfg(codec_stages)]
+    encoder();
 }
 
 /// `BENCH=enc`: the encoders on the single-mode vectors' input PCM (T00..T20, no DTX), Rust vs
 /// vo-amrwbenc, both through their frame loops (homing test, 14-bit input, serial output).
 fn encoder() {
     let cases = common::enc_cases();
+    #[cfg(codec_stages)]
+    println!(
+        "stages enc  {}",
+        amr_wb::stages::NAMES_ENC
+            .iter()
+            .map(|n| format!(" {n:>9}"))
+            .collect::<String>()
+    );
     println!("encoder {:>9} {:>10} {:>8}", "rust µs", "c µs", "speedup");
     let (mut tr, mut tc, mut tn) = (0.0, 0.0, 0usize);
     for (m, name) in MODES.iter().enumerate().filter(|(_, n)| wanted(n)) {
@@ -145,6 +156,8 @@ fn encoder() {
             .collect();
         let frames: usize = set.iter().map(|c| c.input.len() / L_FRAME16K).sum();
         let mode = Mode::from_index(m).unwrap();
+        #[cfg(codec_stages)]
+        amr_wb::stages::take();
         let rust = best(|| {
             for c in &set {
                 let mut e = Encoder::new(false);
@@ -153,6 +166,20 @@ fn encoder() {
                 }
             }
         });
+        // `--cfg codec_stages`: µs per frame per encoder stage (mean of all reps), then the
+        // per-frame total
+        #[cfg(codec_stages)]
+        {
+            let ns = amr_wb::stages::take();
+            let per = (frames * reps()) as f64 * 1e3;
+            let cols: String = ns[..amr_wb::stages::NAMES_ENC.len()]
+                .iter()
+                .map(|&v| format!(" {:>9.2}", v as f64 / per))
+                .collect();
+            let total = ns.iter().sum::<u64>() as f64 / per;
+            println!("stages {name:<4}{cols}  = {total:.2}");
+            continue;
+        }
         let c = best(|| {
             for c in &set {
                 // SAFETY: the shim allocates its state, copies the 320 samples, writes at
