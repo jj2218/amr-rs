@@ -2,13 +2,13 @@
 //! the Rust decoder, and (proving the harness) the TS 26.173 reference and opencore.
 mod common;
 
-use amr_wb::{Decoder, L_FRAME16K, RxFrameType, rfc4867};
+use amr_wb::{Decoder, L_FRAME, RxFrameType, rfc4867};
 use common::{Case, cases};
 
 fn decode_rust(case: &Case) -> Vec<i16> {
     let mut dec = Decoder::new();
-    let mut out = Vec::with_capacity(case.frames.len() * L_FRAME16K);
-    let mut pcm = [0i16; L_FRAME16K];
+    let mut out = Vec::with_capacity(case.frames.len() * L_FRAME);
+    let mut pcm = [0i16; L_FRAME];
     for f in &case.frames {
         dec.decode(f.frame_type, f.mode, &f.bits, &mut pcm);
         out.extend_from_slice(&pcm);
@@ -22,7 +22,7 @@ fn decode_opencore(case: &Case) -> Vec<i16> {
     unsafe {
         let st = opencore_sys::oc_wb_init();
         let mut out = Vec::new();
-        let mut pcm = [0i16; L_FRAME16K];
+        let mut pcm = [0i16; L_FRAME];
         for f in &case.frames {
             let mut prms = f.prms;
             opencore_sys::oc_wb_decode(
@@ -42,7 +42,7 @@ fn decode_opencore(case: &Case) -> Vec<i16> {
 fn decode_ref(case: &Case) -> Vec<i16> {
     let mut dec = ref26173_sys::Decoder::new();
     let mut out = Vec::new();
-    let mut pcm = [0i16; L_FRAME16K];
+    let mut pcm = [0i16; L_FRAME];
     for f in &case.frames {
         let mut prms = f.prms;
         dec.decode(f.mode as i16, f.frame_type as i16, &mut prms, &mut pcm);
@@ -54,12 +54,12 @@ fn decode_ref(case: &Case) -> Vec<i16> {
 /// First differing sample as (frame, sample), if any.
 fn first_diff(got: &[i16], want: &[i16]) -> Option<(usize, usize)> {
     if got.len() != want.len() {
-        return Some((got.len().min(want.len()) / L_FRAME16K, 0));
+        return Some((got.len().min(want.len()) / L_FRAME, 0));
     }
     got.iter()
         .zip(want)
         .position(|(a, b)| a != b)
-        .map(|i| (i / L_FRAME16K, i % L_FRAME16K))
+        .map(|i| (i / L_FRAME, i % L_FRAME))
 }
 
 /// Runs `decode` on every case; prints one summary line and the failing names.
@@ -104,8 +104,8 @@ fn awb_files_decode_like_the_vectors() {
             .collect();
         let file = rfc4867::write_storage(&frames).expect("every vector frame is packable");
         let mut dec = Decoder::new();
-        let mut out = Vec::with_capacity(frames.len() * L_FRAME16K);
-        let mut pcm = [0i16; L_FRAME16K];
+        let mut out = Vec::with_capacity(frames.len() * L_FRAME);
+        let mut pcm = [0i16; L_FRAME];
         let mut n = 0;
         for f in rfc4867::read_storage(&file).unwrap() {
             let f = f.unwrap();

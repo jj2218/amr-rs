@@ -5,7 +5,7 @@
 
 use super::lpc::{QPlsfState, q_plsf_3};
 use crate::basic_op::{Flag, MAX_16, MAX_32, MIN_16, add, l_add, neg_shr, sub};
-use crate::cnst::{L_FRAME, M, Mode};
+use crate::cnst::{CodecMode, L_FRAME, M};
 use crate::gains::GcPredState;
 use crate::lpc::{lsf_lsp, lsp_lsf, reorder_lsf};
 use crate::math::log2;
@@ -92,7 +92,7 @@ pub(crate) fn dtx_enc(
         let mut lsp_q = [0i16; M];
         q_plsf_3(
             q_st,
-            Mode::MRDTX,
+            CodecMode::MRDTX,
             &lsp,
             &mut lsp_q,
             &mut st.lsp_index,
@@ -139,7 +139,7 @@ pub(crate) fn dtx_buffer(st: &mut DtxEncState, lsp_new: &[i16; M], speech: &[i16
 pub(crate) fn tx_dtx_handler(
     st: &mut DtxEncState,
     vad_flag: bool,
-    used_mode: &mut Mode,
+    used_mode: &mut CodecMode,
     ov: &mut Flag,
 ) -> bool {
     st.dec_ana_elapsed_count = add(st.dec_ana_elapsed_count, 1, ov);
@@ -148,12 +148,12 @@ pub(crate) fn tx_dtx_handler(
         false
     } else if st.dtx_hangover_count == 0 {
         st.dec_ana_elapsed_count = 0;
-        *used_mode = Mode::MRDTX;
+        *used_mode = CodecMode::MRDTX;
         true
     } else {
         st.dtx_hangover_count -= 1;
         if add(st.dec_ana_elapsed_count, st.dtx_hangover_count, ov) < DTX_ELAPSED_FRAMES_THRESH {
-            *used_mode = Mode::MRDTX;
+            *used_mode = CodecMode::MRDTX;
         }
         false
     }
@@ -198,8 +198,8 @@ impl SidSyncState {
 }
 
 /// `sid_sync`: TX frame type of a frame encoded with `mode` (the used mode).
-pub(crate) fn sid_sync(st: &mut SidSyncState, mode: Mode) -> TxFrameType {
-    let ft = if mode == Mode::MRDTX {
+pub(crate) fn sid_sync(st: &mut SidSyncState, mode: CodecMode) -> TxFrameType {
+    let ft = if mode == CodecMode::MRDTX {
         st.sid_update_counter -= 1;
         if st.prev_ft == TxFrameType::SpeechGood {
             st.sid_update_counter = 3;

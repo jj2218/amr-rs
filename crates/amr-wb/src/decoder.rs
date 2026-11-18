@@ -109,11 +109,11 @@ impl State {
         mode: usize,
         prms: &[i16],
         frame_type: RxFrameType,
-        synth16k: &mut [i16; L_FRAME16K],
+        synth16k: &mut [i16; L_FRAME],
     ) {
         let mut prms = Bits::new(prms);
         let nb_bits = AMR_WB_COMPRESSED[mode];
-        let mut exc2 = [0i16; L_FRAME];
+        let mut exc2 = [0i16; L_FRAME12K8];
         let mut isf = [0i16; M];
         let mut hf_isf = [0i16; M16K];
         let mut aq = [0i16; NB_SUBFR * (M + 1)];
@@ -156,7 +156,7 @@ impl State {
             isf_isp(&isf, &mut ispnew);
             isp_az(&ispnew, &mut aq, true);
             let isf_tmp = self.isfold;
-            for (j, i_subfr) in (0..L_FRAME).step_by(L_SUBFR).enumerate() {
+            for (j, i_subfr) in (0..L_FRAME12K8).step_by(L_SUBFR).enumerate() {
                 interp_hf_isf(&isf_tmp, &isf, j, &mut hf_isf);
                 synthesis_amr_wb(
                     &aq[..M + 1],
@@ -180,7 +180,7 @@ impl State {
         }
 
         // past excitation, then this frame (+1 sample for the interpolation's look-ahead)
-        let mut old_exc = [0i16; L_FRAME + 1 + OLD_EXC];
+        let mut old_exc = [0i16; L_FRAME12K8 + 1 + OLD_EXC];
         old_exc[..OLD_EXC].copy_from_slice(&self.old_exc);
         let exc = OLD_EXC;
 
@@ -241,7 +241,7 @@ impl State {
         let mut code = [0i16; L_SUBFR];
         let mut excp = [0i16; L_SUBFR];
         let mut sub_exc2 = [0i16; L_SUBFR];
-        for (sf, i_subfr) in (0..L_FRAME).step_by(L_SUBFR).enumerate() {
+        for (sf, i_subfr) in (0..L_FRAME12K8).step_by(L_SUBFR).enumerate() {
             // pitch lag
             let pit_flag = if i_subfr == 2 * L_SUBFR && nb_bits > NBBITS_7K {
                 0
@@ -516,9 +516,10 @@ impl State {
         }
 
         self.old_exc
-            .copy_from_slice(&old_exc[L_FRAME..L_FRAME + OLD_EXC]);
-        scale_signal(&mut old_exc[exc..exc + L_FRAME], -q_new);
-        self.dtx.activity_update(&isf, &old_exc[exc..exc + L_FRAME]);
+            .copy_from_slice(&old_exc[L_FRAME12K8..L_FRAME12K8 + OLD_EXC]);
+        scale_signal(&mut old_exc[exc..exc + L_FRAME12K8], -q_new);
+        self.dtx
+            .activity_update(&isf, &old_exc[exc..exc + L_FRAME12K8]);
         self.dtx.dtx_global_state = new_dtx_state;
         self.prev_bfi = bfi;
     }
@@ -633,7 +634,7 @@ impl Decoder {
         frame_type: RxFrameType,
         mode: Mode,
         bits: &[i16; MAX_SERIAL_SIZE],
-        out: &mut [i16; L_FRAME16K],
+        out: &mut [i16; L_FRAME],
     ) {
         crate::stages::start();
         use RxFrameType::*;

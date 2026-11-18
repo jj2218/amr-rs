@@ -179,7 +179,7 @@ pub(crate) fn updt_tar(x: &[i16], x2: &mut [i16], y: &[i16], gain: i16, l: usize
 
 /// `LP_Decim2`: 5-tap low-pass and decimation by 2, in place (`x[..l/2]` out).
 pub(crate) fn lp_decim2(x: &mut [i16], l: usize, mem: &mut [i16; 3]) {
-    let mut buf = [0i16; crate::cnst::L_FRAME + 3];
+    let mut buf = [0i16; crate::cnst::L_FRAME12K8 + 3];
     buf[..3].copy_from_slice(mem);
     buf[3..3 + l].copy_from_slice(&x[..l]);
     mem.copy_from_slice(&x[l - 3..l]);

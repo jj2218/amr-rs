@@ -14,7 +14,7 @@ use crate::basic_op::{
     Flag, MAX_16, MAX_32, MIN_16, MIN_32, div_s, l_add, l_mac, l_mac_dot, l_mac_energy, l_msu,
     l_shl, l_shr, l_sub, mpy_32, negate, norm_l, round, shl, shr, sub,
 };
-use crate::cnst::{L_FRAME, Mode, PIT_MAX};
+use crate::cnst::{CodecMode, L_FRAME, PIT_MAX};
 use crate::gains::gmed_n;
 use crate::math::inv_sqrt;
 use crate::tables::CORRWEIGHT;
@@ -162,7 +162,7 @@ pub(super) fn lag_max(
 #[allow(clippy::too_many_arguments)] // mirrors the C signature
 pub(crate) fn pitch_ol(
     vad: &mut Vad,
-    mode: Mode,
+    mode: CodecMode,
     sig: &[i16],
     pit_min: usize,
     l_frame: usize,
@@ -172,7 +172,7 @@ pub(crate) fn pitch_ol(
 ) -> i16 {
     let pit_max = PIT_MAX;
     if dtx && let Vad::One(v) = vad {
-        vad_tone_detection_update(v, matches!(mode, Mode::MR475 | Mode::MR515), ov);
+        vad_tone_detection_update(v, matches!(mode, CodecMode::MR475 | CodecMode::MR515), ov);
     }
     let n = pit_max + l_frame;
     let mut t0: i32 = 0;
@@ -200,7 +200,7 @@ pub(crate) fn pitch_ol(
     };
     let mut corr: Corr = [0; PIT_MAX + 1];
     comp_corr_exact(&scaled, n, l_frame, pit_max, pit_min, &mut corr);
-    let scal_flag = mode == Mode::MR122;
+    let scal_flag = mode == CodecMode::MR122;
 
     let (mut max1, mut max2, mut max3) = (0i16, 0i16, 0i16);
     let j = 4 * pit_min;
@@ -464,7 +464,7 @@ pub(crate) fn pitch_ol_wgh(
 pub(crate) fn ol_ltp(
     st: &mut PitchOlWghtState,
     vad: &mut Vad,
-    mode: Mode,
+    mode: CodecMode,
     wsp: &[i16],
     old_lags: &mut [i16; 5],
     ol_gain_flg: &mut [i16; 2],
@@ -472,17 +472,17 @@ pub(crate) fn ol_ltp(
     dtx: bool,
     ov: &mut Flag,
 ) -> i16 {
-    if mode != Mode::MR102 {
+    if mode != CodecMode::MR102 {
         *ol_gain_flg = [0, 0];
     }
     match mode {
-        Mode::MR475 | Mode::MR515 => {
+        CodecMode::MR475 | CodecMode::MR515 => {
             pitch_ol(vad, mode, wsp, PIT_MIN, L_FRAME, idx as i16, dtx, ov)
         }
-        m if m <= Mode::MR795 => {
+        m if m <= CodecMode::MR795 => {
             pitch_ol(vad, mode, wsp, PIT_MIN, L_FRAME_BY2, idx as i16, dtx, ov)
         }
-        Mode::MR102 => pitch_ol_wgh(
+        CodecMode::MR102 => pitch_ol_wgh(
             st,
             vad,
             wsp,

@@ -8,7 +8,7 @@
 //! `WB_STRESS_STREAMS=<n>` runs more streams per class (default 40).
 mod common;
 
-use amr_wb::{Decoder, L_FRAME16K, RxFrameType};
+use amr_wb::{Decoder, L_FRAME, RxFrameType};
 use common::stress::{Mix, Rng, pool, stream};
 use common::{Frame, cases};
 
@@ -16,7 +16,7 @@ use common::{Frame, cases};
 pub fn first_divergence(frames: &[Frame]) -> Option<usize> {
     let mut rust = Decoder::new();
     let mut c = ref26173_sys::Decoder::new();
-    let (mut a, mut b) = ([0i16; L_FRAME16K], [0i16; L_FRAME16K]);
+    let (mut a, mut b) = ([0i16; L_FRAME], [0i16; L_FRAME]);
     for (n, f) in frames.iter().enumerate() {
         rust.decode(f.frame_type, f.mode, &f.bits, &mut a);
         let mut prms = f.prms;

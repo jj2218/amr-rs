@@ -5,7 +5,7 @@ use super::bits::Serial;
 use super::lpc::qisf_ns;
 use super::ops::*;
 use crate::basic_op::dot_product12;
-use crate::cnst::{L_FRAME, M, RANDOM_INITSEED};
+use crate::cnst::{L_FRAME12K8, M, RANDOM_INITSEED};
 use crate::enc_tables::EN_ADJUST;
 use crate::excitation::noise_gen_amrwb as random;
 
@@ -96,20 +96,20 @@ impl DtxEncState {
         let exp0 = norm_l(level32);
         let level = extract_h(l_shl(level32, exp0));
         let exp0 = sub(15, exp0);
-        for v in exc2[..L_FRAME].iter_mut() {
+        for v in exc2[..L_FRAME12K8].iter_mut() {
             *v = shr(random(&mut self.cng_seed), 4);
         }
         let mut exp = 0;
-        let mut ener32 = dot_product12(&exc2[..L_FRAME], &exc2[..L_FRAME], &mut exp);
+        let mut ener32 = dot_product12(&exc2[..L_FRAME12K8], &exc2[..L_FRAME12K8], &mut exp);
         isqrt_n(&mut ener32, &mut exp);
         let gain = mult(level, extract_h(ener32));
         let exp = add(add(exp0, exp), 4);
-        for v in exc2[..L_FRAME].iter_mut() {
+        for v in exc2[..L_FRAME12K8].iter_mut() {
             *v = shl(mult(*v, gain), exp);
         }
     }
 
-    /// `dtx_buffer`: stores the frame's ISFs and log energy of `enr` (residual, `L_FRAME`).
+    /// `dtx_buffer`: stores the frame's ISFs and log energy of `enr` (residual, `L_FRAME12K8`).
     pub(crate) fn buffer(&mut self, isf_new: &[i16; M], enr: i32, codec_mode: i16) {
         self.hist_ptr = add(self.hist_ptr, 1);
         if self.hist_ptr == DTX_HIST_SIZE as i16 {
@@ -327,7 +327,7 @@ mod vs_ref {
                 st.buffer(&isf, enr, mode);
                 let sid = r.u64().is_multiple_of(4);
                 let (mut bits, mut cbits) = ([0i16; 35], [0i16; 35]);
-                let (mut exc, mut excc) = ([0i16; L_FRAME], [0i16; L_FRAME]);
+                let (mut exc, mut excc) = ([0i16; L_FRAME12K8], [0i16; L_FRAME12K8]);
                 let mut isfc = isf;
                 if sid {
                     let mut s = Serial::new(&mut bits);

@@ -8,7 +8,7 @@
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use amr_wb::{Decoder, Encoder, L_FRAME16K, Mode};
+use amr_wb::{Decoder, Dtx, Encoder, L_FRAME, Mode};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -121,7 +121,7 @@ fn decoder() {
         let rust = best(|| {
             for c in &set {
                 let mut d = Decoder::new();
-                let mut pcm = [0i16; L_FRAME16K];
+                let mut pcm = [0i16; L_FRAME];
                 for f in &c.frames {
                     d.decode(f.frame_type, f.mode, &f.bits, &mut pcm);
                     black_box(&pcm);
@@ -143,7 +143,7 @@ fn decoder() {
                 // SAFETY: the shim allocates its state; each prms holds 477 words.
                 unsafe {
                     let st = opencore_sys::oc_wb_init();
-                    let mut pcm = [0i16; L_FRAME16K];
+                    let mut pcm = [0i16; L_FRAME];
                     for (f, bits) in case.frames.iter().zip(p.iter_mut()) {
                         opencore_sys::oc_wb_decode(
                             st,
@@ -178,14 +178,14 @@ fn encoder() {
             .iter()
             .filter(|c| c.name.starts_with(&dir) && !c.dtx && !c.sync)
             .collect();
-        let frames: usize = set.iter().map(|c| c.input.len() / L_FRAME16K).sum();
+        let frames: usize = set.iter().map(|c| c.input.len() / L_FRAME).sum();
         let mode = Mode::from_index(m).unwrap();
         #[cfg(codec_stages)]
         amr_wb::stages::take();
         let rust = best(|| {
             for c in &set {
-                let mut e = Encoder::new(false);
-                for f in c.input.as_chunks::<L_FRAME16K>().0 {
+                let mut e = Encoder::new(Dtx::Off);
+                for f in c.input.as_chunks::<L_FRAME>().0 {
                     black_box(e.encode(mode, f));
                 }
             }
@@ -202,7 +202,7 @@ fn encoder() {
                 unsafe {
                     let st = opencore_sys::vo_wbenc_init();
                     let mut out = [0i16; 480];
-                    for f in c.input.as_chunks::<L_FRAME16K>().0 {
+                    for f in c.input.as_chunks::<L_FRAME>().0 {
                         black_box(opencore_sys::vo_wbenc_encode(
                             st,
                             m as i32,

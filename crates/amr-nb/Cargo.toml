@@ -1,6 +1,6 @@
 [package]
 name = "amr-nb"
-version = "0.1.1"
+version = "0.2.0"
 description = "Pure-Rust, bit-exact AMR-NB (3GPP TS 26.073) speech codec: encoder, decoder, DTX, RFC 4867 packing"
 keywords = ["amr", "speech", "codec", "audio", "3gpp"]
 categories = ["multimedia::audio", "multimedia::encoding", "encoding"]

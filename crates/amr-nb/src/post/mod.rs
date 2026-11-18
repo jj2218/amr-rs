@@ -4,7 +4,7 @@
 //! Bit-exact ports of opencore-amr 0.1.6 (Apache-2.0) `common/src/{syn_filt,residu,weight_a}.cpp`
 //! and `dec/src/{preemph,agc,pstfilt,post_pro}.cpp`.
 
-pub(crate) use crate::cnst::{L_FRAME, L_SUBFR, M, MP1, Mode};
+pub(crate) use crate::cnst::{CodecMode, L_FRAME, L_SUBFR, M, MP1};
 pub(crate) mod agc;
 pub(crate) mod filt;
 pub(crate) mod post_pro;

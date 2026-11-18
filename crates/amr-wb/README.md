@@ -2,21 +2,21 @@
 
 Pure-Rust, bit-exact AMR-WB (3GPP TS 26.173, ITU-T G.722.2) speech decoder and encoder, with
 RFC 4867 packing (`.awb` files, RTP payloads octet-aligned and bandwidth-efficient). No
-`unsafe`, no dependencies. The decoder is ported from opencore-amr 0.1.6, the encoder from
+dependencies; the only `unsafe` is `src/simd.rs` (runtime AVX2 dispatch, AVX2 kernels). The decoder is ported from opencore-amr 0.1.6, the encoder from
 vo-amrwbenc 0.1.3 (both Apache-2.0), each corrected to the specification wherever it differs.
 
 ```rust
-use amr_wb::{Decoder, L_FRAME16K, rfc4867};
+use amr_wb::{Decoder, L_FRAME, rfc4867};
 
 let mut dec = Decoder::new();
-let mut pcm = [0i16; L_FRAME16K]; // 20 ms at 16 kHz
+let mut pcm = [0i16; L_FRAME]; // 20 ms at 16 kHz
 for frame in rfc4867::read_storage(&std::fs::read("speech.awb")?)? {
     let f = frame?; // frames before a damaged one are still delivered
     dec.decode(f.frame_type, f.mode, &f.bits, &mut pcm);
 }
 
-let mut enc = amr_wb::Encoder::new(true); // with DTX (comfort noise in pauses)
-let frames: Vec<_> = samples.as_chunks::<L_FRAME16K>().0.iter()
+let mut enc = amr_wb::Encoder::new(amr_wb::Dtx::On); // comfort noise in pauses
+let frames: Vec<_> = samples.as_chunks::<L_FRAME>().0.iter()
     .map(|pcm| enc.encode(amr_wb::Mode::MD1265, pcm))
     .collect();
 std::fs::write("out.awb", rfc4867::write_storage(&frames)?)?;

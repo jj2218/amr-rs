@@ -13,7 +13,7 @@ use crate::basic_op::{
     Flag, MAX_32, MIN_16, abs_s, add, div_s, l_extract, l_mac, l_msu, l_mult, l_shl, l_shr, mpy_32,
     mpy_32_16, negate, norm_l, norm_s, round, shl, shr, sub,
 };
-use crate::cnst::{M, MP1, Mode};
+use crate::cnst::{CodecMode, M, MP1};
 use crate::lpc::{
     int_lpc_1and3, int_lpc_1and3_2, int_lpc_1to3, int_lpc_1to3_2, lsf_lsp, lsp_lsf, reorder_lsf,
 };
@@ -226,7 +226,7 @@ pub(super) fn l_negate(x: i32) -> i32 {
 /// (`p_window`) and `x_12k2` the MR122 one (`p_window_12k2`), both `L_WINDOW` long.
 pub(crate) fn lpc(
     st: &mut LevinsonState,
-    mode: Mode,
+    mode: CodecMode,
     x: &[i16],
     x_12k2: &[i16],
     a: &mut [i16; 4 * MP1],
@@ -235,7 +235,7 @@ pub(crate) fn lpc(
     let mut rc = [0i16; 4];
     let mut r_low = [0i16; MP1];
     let mut r_high = [0i16; MP1];
-    if mode == Mode::MR122 {
+    if mode == CodecMode::MR122 {
         autocorr(x_12k2, M, &mut r_high, &mut r_low, &WINDOW_160_80);
         lag_window(M, &mut r_high, &mut r_low, ov);
         levinson(st, &r_high, &r_low, &mut a[MP1..2 * MP1], &mut rc, ov);
@@ -471,7 +471,7 @@ pub(crate) struct QPlsfState {
 /// initialisation and returns its index in `pred_init_i`).
 pub(crate) fn q_plsf_3(
     st: &mut QPlsfState,
-    mode: Mode,
+    mode: CodecMode,
     lsp1: &[i16],
     lsp1_q: &mut [i16],
     indice: &mut [i16],
@@ -485,7 +485,7 @@ pub(crate) fn q_plsf_3(
     let mut lsf1_q = [0i16; M];
     lsp_lsf(lsp1, &mut lsf1, M, ov);
     lsf_wt(&lsf1, &mut wf1);
-    if mode != Mode::MRDTX {
+    if mode != CodecMode::MRDTX {
         for i in 0..M {
             let temp = ((st.past_rq[i] as i32 * PRED_FAC_3[i] as i32) >> 15) as i16;
             lsf_p[i] = MEAN_LSF_3[i].wrapping_add(temp);
@@ -514,8 +514,10 @@ pub(crate) fn q_plsf_3(
         }
     }
     let (d1, d2, d3) = match mode {
-        Mode::MR475 | Mode::MR515 => (cols(&DICO1_SOA), cols(&DICO2_HALF_SOA), cols(&MR515_3_SOA)),
-        Mode::MR795 => (cols(&MR795_1_SOA), cols(&DICO2_SOA), cols(&DICO3_SOA)),
+        CodecMode::MR475 | CodecMode::MR515 => {
+            (cols(&DICO1_SOA), cols(&DICO2_HALF_SOA), cols(&MR515_3_SOA))
+        }
+        CodecMode::MR795 => (cols(&MR795_1_SOA), cols(&DICO2_SOA), cols(&DICO3_SOA)),
         _ => (cols(&DICO1_SOA), cols(&DICO2_SOA), cols(&DICO3_SOA)),
     };
     indice[0] = vq_subvec3(&mut lsf_r1[0..], &d1, &wf1[0..]);
@@ -827,8 +829,8 @@ impl Default for LspState {
 /// returns how many it wrote.
 pub(crate) fn lsp(
     st: &mut LspState,
-    req_mode: Mode,
-    used_mode: Mode,
+    req_mode: CodecMode,
+    used_mode: CodecMode,
     az: &mut [i16; 4 * MP1],
     az_q: &mut [i16; 4 * MP1],
     lsp_new: &mut [i16; M],
@@ -837,13 +839,13 @@ pub(crate) fn lsp(
 ) -> usize {
     let mut lsp_new_q = [0i16; M];
     let mut written = 0;
-    if req_mode == Mode::MR122 {
+    if req_mode == CodecMode::MR122 {
         let mut lsp_mid = [0i16; M];
         let mut lsp_mid_q = [0i16; M];
         az_lsp(&az[MP1..2 * MP1], &mut lsp_mid, &st.lsp_old);
         az_lsp(&az[3 * MP1..], lsp_new, &lsp_mid);
         int_lpc_1and3_2(&st.lsp_old, &lsp_mid, lsp_new, az, ov);
-        if used_mode != Mode::MRDTX {
+        if used_mode != CodecMode::MRDTX {
             q_plsf_5(
                 &mut st.q_st,
                 &lsp_mid,
@@ -859,7 +861,7 @@ pub(crate) fn lsp(
     } else {
         az_lsp(&az[3 * MP1..], lsp_new, &st.lsp_old);
         int_lpc_1to3_2(&st.lsp_old, lsp_new, az, ov);
-        if used_mode != Mode::MRDTX {
+        if used_mode != CodecMode::MRDTX {
             let mut pred_init_i = 0;
             q_plsf_3(
                 &mut st.q_st,
@@ -875,7 +877,7 @@ pub(crate) fn lsp(
         }
     }
     st.lsp_old = *lsp_new;
-    if used_mode != Mode::MRDTX {
+    if used_mode != CodecMode::MRDTX {
         st.lsp_old_q = lsp_new_q;
     }
     written

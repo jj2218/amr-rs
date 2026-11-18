@@ -16,7 +16,7 @@ const DTX_ELAPSED_FRAMES_THRESH: i16 = 24 + 7 - 1;
 const PN_INITIAL_SEED: i32 = 0x7081_6958;
 
 /// Receive frame type (TS 26.073 `enum RXFrameType`): how the channel delivered the frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum RxFrameType {
     /// Speech frame received correctly.
@@ -258,14 +258,14 @@ pub(crate) fn dtx_dec(
     st: &mut DtxDecState,
     deps: DtxDecDeps<'_>,
     new_state: DtxState,
-    mode: crate::cnst::Mode,
+    mode: crate::cnst::CodecMode,
     parm: &[i16],
     synth: &mut [i16; L_FRAME],
     a_t: &mut [i16; 4 * (M + 1)],
     ov: &mut Flag,
 ) {
     use crate::basic_op::{MAX_16, MIN_16, l_mac, l_shr, mult, shr, sub};
-    use crate::cnst::Mode;
+    use crate::cnst::CodecMode;
     use crate::lpc::{d_plsf_3, init_d_plsf_3, lsf_lsp, lsp_az, lsp_lsf, reorder_lsf};
     let DtxDecDeps {
         mem_syn,
@@ -348,7 +348,7 @@ pub(crate) fn dtx_dec(
             };
 
             init_d_plsf_3(lsf_state, parm[0]);
-            d_plsf_3(lsf_state, Mode::MRDTX, 0, &parm[1..], &mut st.lsp, ov);
+            d_plsf_3(lsf_state, CodecMode::MRDTX, 0, &parm[1..], &mut st.lsp, ov);
             lsf_state.past_r_q = [0; M];
 
             let log_en_index = parm[4];

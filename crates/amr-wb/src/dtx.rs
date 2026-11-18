@@ -10,7 +10,7 @@
 
 use crate::basic_op::*;
 use crate::bits::Bits;
-use crate::cnst::{ISF_GAP, L_FRAME, M, RANDOM_INITSEED, RxFrameType};
+use crate::cnst::{ISF_GAP, L_FRAME12K8, M, RANDOM_INITSEED, RxFrameType};
 use crate::excitation::noise_gen_amrwb;
 use crate::lpc::disf_ns;
 
@@ -107,7 +107,7 @@ impl DtxDecState {
     /// `dtx_dec_amr_wb`: comfort-noise excitation `exc2` (one frame) and ISFs.
     pub(crate) fn dec(
         &mut self,
-        exc2: &mut [i16; L_FRAME],
+        exc2: &mut [i16; L_FRAME12K8],
         new_state: i16,
         isf: &mut [i16; M],
         prms: &mut Bits,
@@ -235,7 +235,7 @@ impl DtxDecState {
         let hp = self.hist_ptr as usize;
         self.isf_hist[hp * M..hp * M + M].copy_from_slice(isf);
         let mut l = 0i32;
-        for &v in &exc[..L_FRAME] {
+        for &v in &exc[..L_FRAME12K8] {
             l = mac_16by16_to_int32(l, v, v);
         }
         l >>= 1;

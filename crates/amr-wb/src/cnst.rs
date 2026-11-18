@@ -1,7 +1,7 @@
 //! Codec constants (`pvamrwbdecoder_cnst.h`, `dtx.h`), the codec mode and the RX frame type.
 
 /// Samples per 12.8 kHz frame.
-pub(crate) const L_FRAME: usize = 256;
+pub(crate) const L_FRAME12K8: usize = 256;
 /// Samples per 16 kHz subframe.
 pub(crate) const L_SUBFR16K: usize = 80;
 /// Samples per 12.8 kHz subframe.
@@ -38,7 +38,7 @@ pub(crate) const NBBITS_23K: i16 = 461;
 pub(crate) const NBBITS_24K: i16 = 477;
 
 /// Samples per 20 ms output frame (16 kHz).
-pub const L_FRAME16K: usize = 320;
+pub const L_FRAME: usize = 320;
 /// The most serial bits a frame carries (23.85 kbit/s).
 pub const MAX_SERIAL_SIZE: usize = 477;
 

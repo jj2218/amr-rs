@@ -19,4 +19,4 @@ pub(crate) use ph_disp::{
 };
 pub(crate) use pred_lt::pred_lt_3or6;
 
-pub(crate) use crate::cnst::{L_INTERPOL, L_SUBFR, Mode, PIT_MAX};
+pub(crate) use crate::cnst::{CodecMode, L_INTERPOL, L_SUBFR, PIT_MAX};

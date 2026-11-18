@@ -15,7 +15,7 @@ use crate::basic_op::{
     Flag, MAX_16, MAX_32, MIN_16, add, l_add, l_mac, l_mac_energy_from, l_msu, l_mult, l_shl,
     max_abs, mult, negate, norm_l, round, shl, sum_abs,
 };
-use crate::cnst::{L_SUBFR, Mode};
+use crate::cnst::{CodecMode, L_SUBFR};
 use crate::math::inv_sqrt;
 use crate::tables::{GRAY, STARTPOS, TRACKTABLE};
 
@@ -2070,34 +2070,34 @@ pub(crate) fn cbsearch(
     y: &mut [i16; L_SUBFR],
     ana: &mut [i16],
     ana_pos: &mut usize,
-    mode: Mode,
+    mode: CodecMode,
     sub_nr: usize,
     ov: &mut Flag,
 ) {
     let mut index = 0i16;
     let p = *ana_pos;
     match mode {
-        Mode::MR475 | Mode::MR515 => {
+        CodecMode::MR475 | CodecMode::MR515 => {
             ana[p] = code_2i40_9bits(sub_nr, x, h, t0, pitch_sharp, code, y, &mut index, ov);
             ana[p + 1] = index;
             *ana_pos += 2;
         }
-        Mode::MR59 => {
+        CodecMode::MR59 => {
             ana[p] = code_2i40_11bits(x, h, t0, pitch_sharp, code, y, &mut index, ov);
             ana[p + 1] = index;
             *ana_pos += 2;
         }
-        Mode::MR67 => {
+        CodecMode::MR67 => {
             ana[p] = code_3i40_14bits(x, h, t0, pitch_sharp, code, y, &mut index, ov);
             ana[p + 1] = index;
             *ana_pos += 2;
         }
-        Mode::MR74 | Mode::MR795 => {
+        CodecMode::MR74 | CodecMode::MR795 => {
             ana[p] = code_4i40_17bits(x, h, t0, pitch_sharp, code, y, &mut index, ov);
             ana[p + 1] = index;
             *ana_pos += 2;
         }
-        Mode::MR102 => {
+        CodecMode::MR102 => {
             let sharp = shl(pitch_sharp, 1, ov);
             sharpen_from(h, t0, sharp, ov);
             code_8i40_31bits(x, res2, h, code, y, &mut ana[p..], ov);

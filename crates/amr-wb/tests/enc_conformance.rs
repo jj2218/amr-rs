@@ -174,7 +174,11 @@ fn vo_amrwbenc_on_vectors() {
 }
 
 fn encode_rust(case: &EncCase) -> Vec<i16> {
-    let mut e = amr_wb::Encoder::new(case.dtx);
+    let mut e = amr_wb::Encoder::new(if case.dtx {
+        amr_wb::Dtx::On
+    } else {
+        amr_wb::Dtx::Off
+    });
     encode(case, |m, f, o| {
         let w = common::cod_words(&e.encode(amr_wb::Mode::from_index(m as usize).unwrap(), f));
         o[..w.len()].copy_from_slice(&w);

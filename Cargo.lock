@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "amr-nb"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "opencore-sys",
  "ref26073-sys",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "amr-wb"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "opencore-sys",
  "ref26173-sys",

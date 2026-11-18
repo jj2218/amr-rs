@@ -1,9 +1,9 @@
 //! Adaptive phase dispersion / anti-sparseness processing (`dec/ph_disp.cpp`).
 
-use super::{L_SUBFR, Mode};
+use super::{CodecMode, L_SUBFR};
 use crate::basic_op::{Flag, MAX_32, MIN_32, add, l_add, l_mult, l_shl, round};
 use crate::tables::{PH_IMP_LOW, PH_IMP_LOW_MR795, PH_IMP_MID, PH_IMP_MID_MR795};
-use Mode::{MR74, MR102, MR122, MR795};
+use CodecMode::{MR74, MR102, MR122, MR795};
 
 const PHDGAINMEMSIZE: usize = 5;
 const PHDTHR1LTP: i16 = 9830;
@@ -48,7 +48,7 @@ pub(crate) fn ph_disp_release(state: &mut PhDispState) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ph_disp(
     state: &mut PhDispState,
-    mode: Mode,
+    mode: CodecMode,
     x: &mut [i16],
     cb_gain: i16,
     ltp_gain: i16,
@@ -370,7 +370,7 @@ mod vs_ref {
             assert!(same(&r, &c), "state after lock/release/reset, call {n}");
 
             // Modes MR475..MR122 (0..=7); the slow-varying mode exercises state history.
-            let mode = Mode::ALL[(g.u64() % 8) as usize];
+            let mode = CodecMode::ALL[(g.u64() % 8) as usize];
             let cb_gain = gain(&mut g, 2000);
             let ltp_gain = gain(&mut g, 12000);
             let pitch_fac = gain(&mut g, 8000);
@@ -404,7 +404,7 @@ mod vs_ref {
                 )
             };
             let ctx = format!(
-                "call {n}: mode={mode} cb={cb_gain} ltp={ltp_gain} pf={pitch_fac} sh={tmp_shift}"
+                "call {n}: mode={mode:?} cb={cb_gain} ltp={ltp_gain} pf={pitch_fac} sh={tmp_shift}"
             );
             assert_eq!(rx, cx, "x, {ctx}");
             assert_eq!(ri, ci, "inno, {ctx}");

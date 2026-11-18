@@ -4,7 +4,7 @@
 #![allow(unsafe_code)]
 
 use crate::basic_op::Flag;
-use crate::cnst::{L_FRAME, L_SUBFR, M, Mode, PIT_MAX};
+use crate::cnst::{CodecMode, L_FRAME, L_SUBFR, M, PIT_MAX};
 use crate::testutil::{N, Rng};
 use opencore_sys as _;
 
@@ -22,8 +22,8 @@ fn signal(g: &mut Rng, buf: &mut [i16]) {
     }
 }
 
-pub(super) fn mode_of(g: &mut Rng) -> Mode {
-    Mode::ALL[(g.u64() % 8) as usize]
+pub(super) fn mode_of(g: &mut Rng) -> CodecMode {
+    CodecMode::ALL[(g.u64() % 8) as usize]
 }
 
 /// Against the TS 26.073 reference (opencore's rewrites of both wrap on full-scale input, and
@@ -68,9 +68,9 @@ mod gains {
         let mut g = Rng::new(2);
         for _ in 0..N {
             let mode = if g.u64() & 1 == 0 {
-                Mode::MR122
+                CodecMode::MR122
             } else {
-                Mode::MR795
+                CodecMode::MR795
             };
             let exp = (g.u64() % 20) as i16;
             let frac = g.u64() as i16 & 0x7fff;
@@ -82,7 +82,7 @@ mod gains {
             assert_eq!(
                 (ri, gr, ra, rb),
                 (ci, gc, a, b),
-                "{mode} exp {exp} frac {frac} gain {gain0}"
+                "{mode:?} exp {exp} frac {frac} gain {gain0}"
             );
         }
     }
@@ -539,7 +539,7 @@ mod whole {
                 ref_sid_sync(sid, used, &mut tx);
             }
             ets[0] = tx as i16;
-            let r = rust.encode(mode, &pcm);
+            let r = rust.encode(crate::Mode::ALL[mode as usize], &pcm);
             let tx = match r.frame_type {
                 crate::RxFrameType::SpeechGood => 0,
                 crate::RxFrameType::SidFirst => 1,
@@ -548,12 +548,12 @@ mod whole {
             };
             assert_eq!(
                 tx, ets[0],
-                "seed {seed} dtx {dtx} frame {f} {mode}: tx type"
+                "seed {seed} dtx {dtx} frame {f} {mode:?}: tx type"
             );
             assert_eq!(
                 r.bits[..],
                 ets[1..=MAX_SERIAL_SIZE],
-                "seed {seed} dtx {dtx} frame {f} {mode}: bits"
+                "seed {seed} dtx {dtx} frame {f} {mode:?}: bits"
             );
         }
         unsafe {
@@ -1168,8 +1168,8 @@ mod modules {
                     "Q_plsf_5 {l1:?} {l2:?}"
                 );
             } else {
-                let mode = Mode::ALL[(g.u64() % 9) as usize];
-                if mode == Mode::MR122 {
+                let mode = CodecMode::ALL[(g.u64() % 9) as usize];
+                if mode == CodecMode::MR122 {
                     continue;
                 }
                 let (mut rq, mut cq, mut ri, mut ci) = ([0i16; M], [0i16; M], [0i16; 3], [0i16; 3]);
@@ -1189,7 +1189,7 @@ mod modules {
                 assert_eq!(
                     (rq, ri, rp, rs.past_rq),
                     (cq, ci, cp, cs),
-                    "Q_plsf_3 {mode} {l1:?}"
+                    "Q_plsf_3 {mode:?} {l1:?}"
                 );
             }
         }
@@ -1213,8 +1213,8 @@ mod modules {
             let dtx = g.u64() & 1 == 1;
             let idx = (g.u64() & 1) as i16;
             let (pit_min, l_frame) = match mode {
-                Mode::MR475 | Mode::MR515 => (20, L_FRAME),
-                Mode::MR122 => (18, L_FRAME / 2),
+                CodecMode::MR475 | CodecMode::MR515 => (20, L_FRAME),
+                CodecMode::MR122 => (18, L_FRAME / 2),
                 _ => (20, L_FRAME / 2),
             };
             let (mut ov, mut o) = (false, 0);
@@ -1233,7 +1233,7 @@ mod modules {
                 )
             };
             let Vad::One(rvs) = &rv else { unreachable!() };
-            assert_eq!((r, rvs), (c, &cv), "{mode} dtx {dtx}");
+            assert_eq!((r, rvs), (c, &cv), "{mode:?} dtx {dtx}");
         }
     }
 
@@ -1259,13 +1259,13 @@ mod modules {
                 )
             };
             let _ = (ov, o); // the reference's flag is global and sticky: values only
-            assert_eq!((r, rg), (c, cg), "{mode} {xn:?} {y1:?}");
+            assert_eq!((r, rg), (c, cg), "{mode:?} {xn:?} {y1:?}");
         }
     }
 
     /// `cbsearch` inputs.
     pub(super) struct CbIn {
-        pub(super) mode: Mode,
+        pub(super) mode: CodecMode,
         x: [i16; L_SUBFR],
         res2: [i16; L_SUBFR],
         hvec: [i16; 2 * L_SUBFR],
@@ -1284,7 +1284,7 @@ mod modules {
         [i16; 2 * L_SUBFR],
     );
 
-    pub(super) fn cb_in(g: &mut Rng, mode: Mode) -> CbIn {
+    pub(super) fn cb_in(g: &mut Rng, mode: CodecMode) -> CbIn {
         let (mut x, mut res2) = ([0i16; L_SUBFR], [0i16; L_SUBFR]);
         signal(g, &mut x);
         signal(g, &mut res2);
@@ -1394,7 +1394,7 @@ mod modules {
             assert_eq!(
                 cb_rust(&c),
                 cb_c(&c, &mut t),
-                "{mode} t0 {} sharp {}",
+                "{mode:?} t0 {} sharp {}",
                 c.t0,
                 c.sharp
             );
@@ -2347,7 +2347,7 @@ mod kernels {
     /// `Pitch_fr` inputs: excitation history (`exc[EXC]` is the subframe start).
     const EXC: usize = PIT_MAX + L_INTERPOL;
     struct PitchIn {
-        mode: Mode,
+        mode: CodecMode,
         t_op: [i16; 2],
         t0_prev: i16,
         i_subfr: i16,
@@ -2419,13 +2419,19 @@ mod kernels {
                 // (reaches norm_corr's Cauchy-Schwarz bound).
                 p.xn = [[32767, -32768][g.u64() as usize & 1]; 40];
             }
-            assert_eq!(pitch_fr_rust(&p), pitch_fr_c(&p), "{} {:?}", p.mode, p.t_op);
+            assert_eq!(
+                pitch_fr_rust(&p),
+                pitch_fr_c(&p),
+                "{:?} {:?}",
+                p.mode,
+                p.t_op
+            );
         }
     }
 
     /// `Qua_gain` inputs: realistic coefficient exponents, sometimes extreme (saturating) ones.
     struct GainIn {
-        mode: Mode,
+        mode: CodecMode,
         exp_gcode0: i16,
         frac_gcode0: i16,
         frac: [i16; 5],
@@ -2810,7 +2816,7 @@ mod kernels {
             };
             sat += (o != 0) as usize;
             let _ = ov;
-            assert_eq!((rf, re, rcf, rce), (cf, ce, ccf, cce), "{mode} {v:?}");
+            assert_eq!((rf, re, rcf, rce), (cf, ce, ccf, cce), "{mode:?} {v:?}");
         }
         assert!(sat > N / 8, "saturating: {sat}");
     }
@@ -3394,18 +3400,24 @@ mod kernels {
             filtered_code(bb(&hs[i]), bb(&cv), &sgn, bb(&mut y), &mut ov)
         });
         let mut t = tables();
-        for mode in [Mode::MR59, Mode::MR67, Mode::MR74, Mode::MR102, Mode::MR122] {
+        for mode in [
+            CodecMode::MR59,
+            CodecMode::MR67,
+            CodecMode::MR74,
+            CodecMode::MR102,
+            CodecMode::MR122,
+        ] {
             let cins: Vec<CbIn> = (0..64).map(|_| cb_in(&mut g, mode)).collect();
-            time(&format!("cbsearch {mode}"), |i| {
+            time(&format!("cbsearch {mode:?}"), |i| {
                 bb(cb_rust(bb(&cins[i])));
             });
-            time(&format!("cbsearch {mode} C"), |i| {
+            time(&format!("cbsearch {mode:?} C"), |i| {
                 bb(cb_oc(bb(&cins[i]), &mut t));
             });
         }
         let gins: Vec<GainIn> = (0..64)
             .map(|_| GainIn {
-                mode: Mode::MR102,
+                mode: CodecMode::MR102,
                 ..gain_in(&mut g)
             })
             .collect();

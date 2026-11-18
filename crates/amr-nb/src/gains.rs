@@ -14,7 +14,7 @@ use crate::tables::{
 };
 
 /// C `enum Mode` (passed as an `int`). Local until a shared mode type exists.
-pub(crate) use crate::cnst::Mode::{self, *};
+pub(crate) use crate::cnst::CodecMode::{self, *};
 
 use crate::cnst::{L_FRAME, L_SUBFR, M};
 
@@ -85,7 +85,7 @@ impl GcPredState {
 /// `exp_en`/`frac_en` are only computed for MR795 (C leaves them untouched otherwise; 0 here).
 pub(crate) fn gc_pred(
     st: &GcPredState,
-    mode: Mode,
+    mode: CodecMode,
     code: &[i16],
     ov: &mut Flag,
 ) -> (i16, i16, i16, i16) {
@@ -228,7 +228,7 @@ pub(crate) fn gc_pred_average_limited(st: &GcPredState, ov: &mut Flag) -> (i16, 
 // ---------------------------------------------------------------------------------------------
 
 /// `d_gain_pitch` (table: `qua_gain_pitch`; `index` < 16).
-pub(crate) fn d_gain_pitch(mode: Mode, index: i16) -> i16 {
+pub(crate) fn d_gain_pitch(mode: CodecMode, index: i16) -> i16 {
     let mut gain = QUA_GAIN_PITCH[index as usize];
     if mode == MR122 {
         gain &= 0xFFFCu16 as i16;
@@ -239,7 +239,7 @@ pub(crate) fn d_gain_pitch(mode: Mode, index: i16) -> i16 {
 /// `d_gain_code` (table: `qua_gain_code`): returns `gain_code`.
 pub(crate) fn d_gain_code(
     pred_state: &mut GcPredState,
-    mode: Mode,
+    mode: CodecMode,
     index: i16,
     code: &[i16],
     ov: &mut Flag,
@@ -273,7 +273,7 @@ const MR475_VQ_SIZE: i16 = 256;
 /// NULL `exp_en` to `gc_pred`, so MR795 would crash there). Tables come from `tables.rs`.
 pub(crate) fn dec_gain(
     pred_state: &mut GcPredState,
-    mode: Mode,
+    mode: CodecMode,
     index: i16,
     code: &[i16],
     even_subfr: i16,
@@ -526,7 +526,7 @@ fn lsp_dev_sum(aver: &[i16; M], lsp: &[i16; M], ov: &mut Flag) -> i16 {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn cb_gain_average(
     st: &mut CbGainAverageState,
-    mode: Mode,
+    mode: CodecMode,
     gain_code: i16,
     lsp: &[i16; M],
     lsp_aver: &[i16; M],

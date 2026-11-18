@@ -14,7 +14,7 @@
 //! `fir32`), dispatched per call the same way; its `*_portable` body is the contract and oracle.
 #![allow(unsafe_code)] // the approved scope: #[target_feature] copies and AVX2 kernels, below
 
-use crate::cnst::{L_FRAME16K, L_SUBFR, M, RxFrameType};
+use crate::cnst::{L_FRAME, L_SUBFR, M, RxFrameType};
 use crate::decoder::State;
 use crate::encoder::kernels as k;
 use crate::synthesis::L_FIR;
@@ -63,7 +63,7 @@ pub(crate) fn decode(
     mode: usize,
     prms: &[i16],
     frame_type: RxFrameType,
-    out: &mut [i16; L_FRAME16K],
+    out: &mut [i16; L_FRAME],
 ) {
     #[cfg(all(target_arch = "x86_64", not(portable)))]
     if avx2() {
@@ -73,7 +73,7 @@ pub(crate) fn decode(
             mode: usize,
             prms: &[i16],
             frame_type: RxFrameType,
-            out: &mut [i16; L_FRAME16K],
+            out: &mut [i16; L_FRAME],
         ) {
             st.decode(mode, prms, frame_type, out)
         }

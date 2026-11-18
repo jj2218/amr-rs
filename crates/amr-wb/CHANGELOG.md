@@ -3,6 +3,15 @@
 One section per release, newest first. The release commit in the repository carries the
 section of each crate it releases.
 
+## 0.4.0 (2026-11-18)
+One API shape for `amr-nb` and `amr-wb`. Breaking changes, with the migration:
+- `Encoder::new` takes a `Dtx` (`Off`, `On`) instead of a `bool`. Migration:
+  `Encoder::new(true)` → `Encoder::new(Dtx::On)`, `false` → `Dtx::Off`.
+- `L_FRAME16K` is renamed `L_FRAME` (320 samples per frame). Migration: rename.
+
+Added
+- `Default` for `Encoder` (without DTX).
+
 ## 0.3.1 (2026-11-18)
 Changed
 - Faster on x86-64 CPUs with AVX2 (detected at run time): the decoder is about 2.2× the speed of

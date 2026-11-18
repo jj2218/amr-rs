@@ -11,7 +11,7 @@ use crate::basic_op::{
     Flag, MAX_16, MAX_32, abs_s, add, div_s, l_add, l_mac, l_mult, l_shl, max_abs, mpy_32, norm_l,
     round, shr, sub, sum_abs,
 };
-use crate::cnst::{L_SUBFR, M, Mode, PIT_MAX};
+use crate::cnst::{CodecMode, L_SUBFR, M, PIT_MAX};
 use crate::excitation::pred_lt_3or6;
 use crate::math::inv_sqrt;
 use crate::tables::{INTER_6, QUA_GAIN_PITCH};
@@ -388,7 +388,7 @@ const MODE_DEP_PARM: [ModeParm; 8] = [
 #[allow(clippy::too_many_arguments)] // mirrors the C signature
 pub(crate) fn pitch_fr(
     st: &mut PitchFrState,
-    mode: Mode,
+    mode: CodecMode,
     t_op: &[i16; 2],
     exc: &[i16],
     exc_off: usize,
@@ -402,7 +402,7 @@ pub(crate) fn pitch_fr(
     let mut last_frac = p.last_frac;
     let mut delta_search = true;
     let pit_max = PIT_MAX as i16;
-    let is_lowrate = matches!(mode, Mode::MR475 | Mode::MR515);
+    let is_lowrate = matches!(mode, CodecMode::MR475 | CodecMode::MR515);
     let (t0_min, t0_max) =
         if (i_subfr == 0 || i_subfr == L_FRAME_BY2) && (!is_lowrate || i_subfr != L_FRAME_BY2) {
             delta_search = false;
@@ -445,7 +445,10 @@ pub(crate) fn pitch_fr(
             lag = i;
         }
     }
-    let delta_modes = matches!(mode, Mode::MR475 | Mode::MR515 | Mode::MR59 | Mode::MR67);
+    let delta_modes = matches!(
+        mode,
+        CodecMode::MR475 | CodecMode::MR515 | CodecMode::MR59 | CodecMode::MR67
+    );
     if !delta_search && lag > p.max_frac_lag {
         frac = 0;
     } else if delta_search && delta_modes {
@@ -551,7 +554,7 @@ pub(crate) fn enc_lag6(t0: i16, t0_frac: i16, t0_min: i16, delta_flag: bool) -> 
 /// optimised version tests for i32 wrap instead and denormalises the scaled `<xn,y1>` by 4
 /// instead of 2: wrong gains on near-full-scale input, `tests/conformance.rs`.)
 pub(crate) fn g_pitch(
-    mode: Mode,
+    mode: CodecMode,
     xn: &[i16],
     y1: &[i16],
     g_coeff: &mut [i16],
@@ -610,7 +613,7 @@ pub(crate) fn g_pitch(
     let mut gain = div_s(xy, yy);
     gain = shr(gain, exp_xy - exp_yy, ov);
     gain = gain.min(19661);
-    if mode == Mode::MR122 {
+    if mode == CodecMode::MR122 {
         gain &= !3;
     }
     gain
@@ -619,7 +622,7 @@ pub(crate) fn g_pitch(
 /// `q_gain_pitch`: scalar pitch-gain quantisation. For MR795 also fills the 3 candidate
 /// gains/indices in `cand` (`(gain_cand, gain_cind)`).
 pub(crate) fn q_gain_pitch(
-    mode: Mode,
+    mode: CodecMode,
     gp_limit: i16,
     gain: &mut i16,
     cand: Option<(&mut [i16; 3], &mut [i16; 3])>,
@@ -637,7 +640,7 @@ pub(crate) fn q_gain_pitch(
             }
         }
     }
-    if mode == Mode::MR795 {
+    if mode == CodecMode::MR795 {
         let ii = if index == 0 {
             0
         } else if index == NB_QUA_PITCH - 1 || q[index + 1] > gp_limit {
@@ -651,7 +654,7 @@ pub(crate) fn q_gain_pitch(
             gain_cand[i] = q[ii + i];
         }
         *gain = q[index];
-    } else if mode == Mode::MR122 {
+    } else if mode == CodecMode::MR122 {
         *gain = q[index] & !3;
     } else {
         *gain = q[index];
@@ -726,7 +729,7 @@ pub(crate) struct ClLtpOut {
 pub(crate) fn cl_ltp(
     pitch_st: &mut PitchFrState,
     ton_st: &TonStabState,
-    mode: Mode,
+    mode: CodecMode,
     frame_offset: i16,
     t_op: &[i16; 2],
     h1: &[i16],
@@ -754,7 +757,7 @@ pub(crate) fn cl_ltp(
     if lsp_flag && gain_pit > GP_CLIP {
         gpc_flag = check_gp_clipping(ton_st, gain_pit, ov);
     }
-    if matches!(mode, Mode::MR475 | Mode::MR515) {
+    if matches!(mode, CodecMode::MR475 | CodecMode::MR515) {
         gain_pit = gain_pit.min(13926);
         if gpc_flag {
             gp_limit = GP_CLIP;
@@ -764,8 +767,8 @@ pub(crate) fn cl_ltp(
             gp_limit = GP_CLIP;
             gain_pit = GP_CLIP;
         }
-        if mode == Mode::MR122 {
-            ana[*ana_pos] = q_gain_pitch(Mode::MR122, gp_limit, &mut gain_pit, None, ov);
+        if mode == CodecMode::MR122 {
+            ana[*ana_pos] = q_gain_pitch(CodecMode::MR122, gp_limit, &mut gain_pit, None, ov);
             *ana_pos += 1;
         }
     }

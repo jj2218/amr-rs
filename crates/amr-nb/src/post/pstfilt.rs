@@ -3,7 +3,7 @@
 use super::agc::{AgcState, agc};
 use super::filt::{residu, syn_filt, weight_ai};
 use super::preemph::{PreemphasisState, preemphasis};
-use super::{AGC_FAC, L_FRAME, L_SUBFR, M, MP1, MU, Mode};
+use super::{AGC_FAC, CodecMode, L_FRAME, L_SUBFR, M, MP1, MU};
 use crate::basic_op::{Flag, MAX_32, div_s, l_mac, l_mult};
 
 /// `L_H`: length of the truncated impulse response.
@@ -82,7 +82,7 @@ fn autocorr_h_chain(h: &[i16; L_H], lag: usize, ov: &mut Flag) -> i32 {
 /// filters `az_4[..4 * MP1]`.
 pub(crate) fn post_filter(
     st: &mut PostFilterState,
-    mode: Mode,
+    mode: CodecMode,
     syn: &mut [i16],
     az_4: &[i16],
     ov: &mut Flag,
@@ -94,7 +94,7 @@ pub(crate) fn post_filter(
 
     for (sf, i_subfr) in (0..L_FRAME).step_by(L_SUBFR).enumerate() {
         let az = &az_4[sf * MP1..(sf + 1) * MP1];
-        if mode == Mode::MR122 || mode == Mode::MR102 {
+        if mode == CodecMode::MR122 || mode == CodecMode::MR102 {
             weight_ai(az, &GAMMA3_MR122, &mut ap3);
             weight_ai(az, &GAMMA4_MR122, &mut ap4);
         } else {
@@ -231,16 +231,16 @@ mod vs_ref {
         ret
     }
 
-    const MODES: [Mode; 9] = [
-        Mode::MR475,
-        Mode::MR515,
-        Mode::MR59,
-        Mode::MR67,
-        Mode::MR74,
-        Mode::MR795,
-        Mode::MR102,
-        Mode::MR122,
-        Mode::MRDTX,
+    const MODES: [CodecMode; 9] = [
+        CodecMode::MR475,
+        CodecMode::MR515,
+        CodecMode::MR59,
+        CodecMode::MR67,
+        CodecMode::MR74,
+        CodecMode::MR795,
+        CodecMode::MR102,
+        CodecMode::MR122,
+        CodecMode::MRDTX,
     ];
 
     /// `autocorr_h`'s bounded plain sum vs the C's loop (`autocorr_h_chain`), both lags.

@@ -43,6 +43,6 @@ mod testutil;
 #[cfg(test)]
 mod vs_ref;
 
-pub use cnst::{L_FRAME16K, MAX_SERIAL_SIZE, Mode, RxFrameType, SID_BITS};
+pub use cnst::{L_FRAME, MAX_SERIAL_SIZE, Mode, RxFrameType, SID_BITS};
 pub use decoder::Decoder;
-pub use encoder::Encoder;
+pub use encoder::{Dtx, Encoder};

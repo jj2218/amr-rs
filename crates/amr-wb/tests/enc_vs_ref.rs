@@ -5,7 +5,7 @@
 //! off. Every output word is compared.
 mod common;
 
-use amr_wb::{Encoder, Mode};
+use amr_wb::{Dtx, Encoder, Mode};
 use common::stress::Rng;
 use common::{cod_words, encoder_cases};
 
@@ -87,7 +87,7 @@ fn frame(r: &mut Rng, class: Class, speech: &[i16], t: &mut usize) -> [i16; 320]
 /// through both encoders; returns the first differing frame.
 fn stream(seed: u64, frames: usize, dtx: bool, speech: &[i16]) -> Option<String> {
     let mut r = Rng::seeded(seed);
-    let mut rust = Encoder::new(dtx);
+    let mut rust = Encoder::new(if dtx { Dtx::On } else { Dtx::Off });
     let mut c = ref26173_sys::Encoder::new(dtx);
     let mut t = 0;
     let mut class = pick(&mut r);
@@ -162,7 +162,7 @@ fn speech_with_pauses() -> Vec<(Mode, [i16; 320])> {
 fn encoder_output_round_trips_through_awb() {
     use amr_wb::rfc4867::{Frame, read_storage, write_storage};
     use amr_wb::{RxFrameType, SID_BITS};
-    let mut enc = Encoder::new(true);
+    let mut enc = Encoder::new(Dtx::On);
     let mut frames = Vec::new();
     for (mode, pcm) in speech_with_pauses() {
         let f = enc.encode(mode, &pcm);
@@ -216,7 +216,7 @@ fn awb_matches_the_reference_writer() {
     }
     const MRDTX: i16 = 9;
     let input = speech_with_pauses();
-    let mut enc = Encoder::new(true);
+    let mut enc = Encoder::new(Dtx::On);
     let frames: Vec<_> = input.iter().map(|(m, pcm)| enc.encode(*m, pcm)).collect();
     let first_cn = frames
         .iter()

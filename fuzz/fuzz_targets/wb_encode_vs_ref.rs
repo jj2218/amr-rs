@@ -8,7 +8,7 @@
 //! must be equal; any difference is a crash.
 #![no_main]
 
-use amr_wb::{Encoder, L_FRAME16K, Mode, RxFrameType, SID_BITS};
+use amr_wb::{Dtx, Encoder, L_FRAME, Mode, RxFrameType, SID_BITS};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
@@ -18,17 +18,17 @@ fuzz_target!(|data: &[u8]| {
     let dtx = flags & 1 != 0;
     let reps = 1 + usize::from((flags >> 1) & 7);
     let shift = flags >> 4;
-    let mut rust = Encoder::new(dtx);
+    let mut rust = Encoder::new(if dtx { Dtx::On } else { Dtx::Off });
     let mut c = ref26173_sys::Encoder::new(dtx);
     let mut want = [0i16; 480];
     for (i, chunk) in frames
-        .as_chunks::<{ 1 + 2 * L_FRAME16K }>()
+        .as_chunks::<{ 1 + 2 * L_FRAME }>()
         .0
         .iter()
         .enumerate()
     {
         let m = chunk[0] % 9;
-        let pcm: [i16; L_FRAME16K] = std::array::from_fn(|k| {
+        let pcm: [i16; L_FRAME] = std::array::from_fn(|k| {
             i16::from_le_bytes([chunk[1 + 2 * k], chunk[2 + 2 * k]]) >> shift
         });
         for r in 0..reps {

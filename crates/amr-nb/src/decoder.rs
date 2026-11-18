@@ -4,7 +4,7 @@
 //! 3GPP TS 26.074 test vectors (`just conform`).
 
 use crate::basic_op::{Flag, MAX_16, MIN_16, add, l_mac_energy, l_mult, l_shr, mult, round, shl};
-use crate::cnst::{L_FRAME, L_INTERPOL, L_SUBFR, M, MP1, Mode, PIT_MAX};
+use crate::cnst::{CodecMode, L_FRAME, L_INTERPOL, L_SUBFR, M, MP1, Mode, PIT_MAX};
 use crate::dtx::{DtxDecDeps, DtxDecState, DtxState, build_cn_param, dtx_dec};
 use crate::excitation::{
     PhDispState, dec_8i40_31bits, dec_10i40_35bits, dec_lag3, dec_lag6, decode_2i40_9bits,
@@ -116,13 +116,13 @@ impl DecoderAmr {
             dtx_decoder_state: DtxDecState::new(),
             overflow: false,
         };
-        s.reset(Mode::MR475);
+        s.reset(CodecMode::MR475);
         s
     }
 
     /// `Decoder_amr_reset`. With `MRDTX`, speech history needed by comfort noise is kept.
-    fn reset(&mut self, mode: Mode) {
-        let dtx = mode == Mode::MRDTX;
+    fn reset(&mut self, mode: CodecMode) {
+        let dtx = mode == CodecMode::MRDTX;
         // C zeroes only the history part (`PIT_MAX + L_INTERPOL`), not the current subframe.
         self.old_exc[..EXC].fill(0);
         if !dtx {
@@ -166,13 +166,13 @@ impl DecoderAmr {
     /// subframe LP filters for the post-filter.
     fn decode(
         &mut self,
-        mode: Mode,
+        mode: CodecMode,
         parm: &[i16],
         frame_type: RxFrameType,
         synth: &mut [i16; L_FRAME],
         a_t: &mut [i16; AZ_SIZE],
     ) {
-        use Mode::*;
+        use CodecMode::*;
         let mut ov = self.overflow;
         let new_dtx_state = self.dtx_decoder_state.rx_dtx_handler(frame_type, &mut ov);
 
@@ -716,22 +716,26 @@ impl DecoderAmr {
 }
 
 /// Bits per parameter for `mode` (`bitno_ptr[mode]`).
-fn bitno(mode: Mode) -> &'static [i16] {
+fn bitno(mode: CodecMode) -> &'static [i16] {
     match mode {
-        Mode::MR475 => &tables::BITNO_MR475,
-        Mode::MR515 => &tables::BITNO_MR515,
-        Mode::MR59 => &tables::BITNO_MR59,
-        Mode::MR67 => &tables::BITNO_MR67,
-        Mode::MR74 => &tables::BITNO_MR74,
-        Mode::MR795 => &tables::BITNO_MR795,
-        Mode::MR102 => &tables::BITNO_MR102,
-        Mode::MR122 => &tables::BITNO_MR122,
-        Mode::MRDTX => &tables::BITNO_MRDTX,
+        CodecMode::MR475 => &tables::BITNO_MR475,
+        CodecMode::MR515 => &tables::BITNO_MR515,
+        CodecMode::MR59 => &tables::BITNO_MR59,
+        CodecMode::MR67 => &tables::BITNO_MR67,
+        CodecMode::MR74 => &tables::BITNO_MR74,
+        CodecMode::MR795 => &tables::BITNO_MR795,
+        CodecMode::MR102 => &tables::BITNO_MR102,
+        CodecMode::MR122 => &tables::BITNO_MR122,
+        CodecMode::MRDTX => &tables::BITNO_MRDTX,
     }
 }
 
 /// `Bits2prm`: serial bits (one per `i16`) to codec parameters for `mode`.
-fn bits2prm(mode: Mode, bits: &[i16; MAX_SERIAL_SIZE], prm: &mut [i16; MAX_PRM_SIZE + 1]) -> usize {
+fn bits2prm(
+    mode: CodecMode,
+    bits: &[i16; MAX_SERIAL_SIZE],
+    prm: &mut [i16; MAX_PRM_SIZE + 1],
+) -> usize {
     let mut b = 0;
     let widths = bitno(mode);
     for (p, &w) in prm.iter_mut().zip(widths) {
@@ -800,15 +804,20 @@ impl Decoder {
 
     /// `Speech_Decode_Frame_reset`: back to the initial state.
     pub fn reset(&mut self) {
-        self.amr.reset(Mode::MR475);
+        self.amr.reset(CodecMode::MR475);
         self.post_state.reset();
         self.post_hp_state.reset();
         self.prev_mode = Mode::MR475;
         self.homed = true;
     }
 
-    /// Decodes one 20 ms frame. For `RxFrameType::NoData` the `mode` argument is ignored and the
-    /// previous mode is used, as in the reference decoder.
+    /// Decodes one frame. `bits` holds the frame's serial bits, one per element (0 or 1), in
+    /// TS 26.073 parameter order: `mode.bits()` of them for speech frames, [`SID_BITS`] for
+    /// SID frames, none read for [`RxFrameType::NoData`]. `mode` is ignored for NO_DATA
+    /// frames: the last frame's is used (for a SID frame, `mode` is its mode indication), as
+    /// the TS 26.073 reference does.
+    ///
+    /// [`SID_BITS`]: crate::SID_BITS
     pub fn decode(
         &mut self,
         frame_type: RxFrameType,
@@ -823,29 +832,21 @@ impl Decoder {
             mode
         };
         let mut prm = [0i16; MAX_PRM_SIZE + 1];
-        let homing_mode = if mode == Mode::MRDTX {
-            None
-        } else {
-            Some(mode)
-        };
-        let dhf = homing_mode.map(|m| DHF_PARAMS[m as usize]);
-        let first_sf = homing_mode.map_or(0, |m| tables::PRMNOFSF[m as usize] as usize);
-        let is_dhf = |prm: &[i16], n: usize| dhf.is_some_and(|d| prm[..n] == d[..n]);
+        let dhf = DHF_PARAMS[mode as usize];
+        let first_sf = tables::PRMNOFSF[mode as usize] as usize;
+        let is_dhf = |prm: &[i16], n: usize| prm[..n] == dhf[..n];
 
-        if let Some(m) = homing_mode {
-            bits2prm(m, bits, &mut prm);
-        }
+        bits2prm(mode.into(), bits, &mut prm);
         // Homed: a homing frame (checked up to the end of subframe 1) produces the EHF output.
         let mut reset = self.homed && is_dhf(&prm, first_sf);
         if reset {
             out.fill(EHF);
         } else {
             // Reuse the homing check's parameters when decode_frame would parse the same.
-            let parsed = homing_mode.is_some().then_some(&prm);
-            self.decode_frame(frame_type, mode, bits, parsed, out);
+            self.decode_frame(frame_type, mode.into(), bits, &prm, out);
         }
         if !self.homed {
-            reset = dhf.is_some_and(|d| is_dhf(&prm, d.len()));
+            reset = is_dhf(&prm, dhf.len());
         }
         if reset {
             self.reset();
@@ -859,19 +860,15 @@ impl Decoder {
     fn decode_frame(
         &mut self,
         frame_type: RxFrameType,
-        mode: Mode,
+        mode: CodecMode,
         bits: &[i16; MAX_SERIAL_SIZE],
-        parsed: Option<&[i16; MAX_PRM_SIZE + 1]>,
+        parsed: &[i16; MAX_PRM_SIZE + 1],
         synth: &mut [i16; L_FRAME],
     ) {
-        let mut parm = [0i16; MAX_PRM_SIZE + 1];
-        let sid = matches!(frame_type, RxFrameType::SidBad | RxFrameType::SidUpdate);
-        match parsed {
-            // `parsed` is bits2prm(mode, bits): valid unless a SID frame needs MRDTX's layout.
-            Some(p) if !sid => parm = *p,
-            _ => {
-                bits2prm(if sid { Mode::MRDTX } else { mode }, bits, &mut parm);
-            }
+        let mut parm = *parsed;
+        // `parsed` is bits2prm(mode, bits): valid unless a SID frame needs MRDTX's layout.
+        if matches!(frame_type, RxFrameType::SidBad | RxFrameType::SidUpdate) {
+            bits2prm(CodecMode::MRDTX, bits, &mut parm);
         }
         let mut az = [0i16; AZ_SIZE];
         self.amr.decode(mode, &parm, frame_type, synth, &mut az);
@@ -911,7 +908,7 @@ mod homing {
     }
 
     /// DHF parameters from opencore's encoder (ETS output format = 2).
-    fn dhf_from_encoder(mode: Mode) -> Vec<i16> {
+    fn dhf_from_encoder(mode: CodecMode) -> Vec<i16> {
         let (mut enc, mut sid) = (null_mut(), null_mut());
         let mut ehf = [EHF; L_FRAME];
         let mut out = [0i16; MAX_SERIAL_SIZE + 2];
@@ -937,11 +934,11 @@ mod homing {
 
     #[test]
     fn dhf_params_match_opencore_encoder() {
-        for mode in &Mode::ALL[..8] {
+        for mode in &CodecMode::ALL[..8] {
             assert_eq!(
                 DHF_PARAMS[*mode as usize],
                 dhf_from_encoder(*mode),
-                "{mode}"
+                "{mode:?}"
             );
         }
     }
@@ -954,7 +951,7 @@ mod homing {
             "// @generated by decoder::homing::print_dhf_params (opencore encoder output for the EHF)"
         );
         println!("[");
-        for mode in &Mode::ALL[..8] {
+        for mode in &CodecMode::ALL[..8] {
             println!("    &{:?},", dhf_from_encoder(*mode));
         }
         println!("]");
@@ -1023,7 +1020,7 @@ mod vs_ref {
             unsafe {
                 ref_Speech_Decode_Frame(st, m as i32, bits.as_mut_ptr(), ft as i32, c.as_mut_ptr())
             };
-            assert_eq!(r, c, "seed {seed} frame {f}: {ft:?} {mode}");
+            assert_eq!(r, c, "seed {seed} frame {f}: {ft:?} {mode:?}");
         }
         unsafe { ref_Speech_Decode_Frame_exit(&mut st) };
     }
@@ -1060,7 +1057,7 @@ mod vs_ref {
                         c.as_mut_ptr(),
                     )
                 };
-                assert_eq!(r, c, "seed {seed} frame {f}: {ft:?} {mode}");
+                assert_eq!(r, c, "seed {seed} frame {f}: {ft:?} {mode:?}");
             }
             unsafe { ref_Speech_Decode_Frame_exit(&mut st) };
         }

@@ -13,7 +13,7 @@ use crate::basic_op::{
     l_shl, l_shr, l_sub, mac_32, mac_32_16, mpy_32_16, mult, negate, norm_l, round, shl, shr,
     shr_r, sub,
 };
-use crate::cnst::{L_SUBFR, Mode};
+use crate::cnst::{CodecMode, L_SUBFR};
 use crate::gains::{GcPredState, gc_pred, gc_pred_update, gmed_n};
 use crate::math::{log2, pow2, sqrt_l_exp};
 pub(crate) use crate::simd::{mr475_search, mr795_search, qua_gain_exact};
@@ -128,7 +128,7 @@ pub(super) fn calc_unfilt_energies(
 /// MR795 also the optimum unquantised codebook gain `(frac, exp)`.
 #[allow(clippy::too_many_arguments)] // mirrors the C signature
 pub(super) fn calc_filt_energies(
-    mode: Mode,
+    mode: CodecMode,
     xn: &[i16],
     xn2: &[i16],
     y1: &[i16],
@@ -144,7 +144,7 @@ pub(super) fn calc_filt_energies(
     exp_coeff[0] = g_coeff[1];
     frac_coeff[1] = negate(g_coeff[2]);
     exp_coeff[1] = add(g_coeff[3], 1, ov);
-    let special = matches!(mode, Mode::MR795 | Mode::MR475);
+    let special = matches!(mode, CodecMode::MR795 | CodecMode::MR475);
     let init = if special { 0 } else { 1 };
     let (xn, xn2, y1) = (&xn[..L_SUBFR], &xn2[..L_SUBFR], &y1[..L_SUBFR]);
     let scaled_y2: [i16; L_SUBFR] = core::array::from_fn(|i| y2[i] >> 3);
@@ -223,7 +223,7 @@ pub(super) fn g_code(xn2: &[i16], y2: &[i16]) -> i16 {
 
 /// `q_gain_code`: scalar quantisation of the codebook gain (MR122, MR795 fallback).
 pub(super) fn q_gain_code(
-    mode: Mode,
+    mode: CodecMode,
     exp_gcode0: i16,
     frac_gcode0: i16,
     gain: &mut i16,
@@ -231,7 +231,7 @@ pub(super) fn q_gain_code(
     qua_ener: &mut i16,
     ov: &mut Flag,
 ) -> i16 {
-    let mr122 = mode == Mode::MR122;
+    let mr122 = mode == CodecMode::MR122;
     let g_q0 = if mr122 { *gain >> 1 } else { *gain };
     let mut gcode0 = pow2(exp_gcode0, frac_gcode0, ov) as i16;
     gcode0 = shl(gcode0, if mr122 { 4 } else { 5 }, ov);
@@ -275,7 +275,7 @@ pub(super) fn normalise_coeffs(
 /// `Qua_gain`: joint pitch/codebook gain VQ (MR59, MR67, MR74, MR102 and MR515).
 #[allow(clippy::too_many_arguments)] // mirrors the C signature
 pub(super) fn qua_gain(
-    mode: Mode,
+    mode: CodecMode,
     exp_gcode0: i16,
     frac_gcode0: i16,
     frac_coeff: &[i16; 5],
@@ -288,7 +288,7 @@ pub(super) fn qua_gain(
     ov: &mut Flag,
 ) -> i16 {
     let (table, cols): (&[i16], [&[i16]; 2]) =
-        if matches!(mode, Mode::MR102 | Mode::MR74 | Mode::MR67) {
+        if matches!(mode, CodecMode::MR102 | CodecMode::MR74 | CodecMode::MR67) {
             (&TABLE_GAIN_HIGHRATES, cols(&HIGHRATES_SOA))
         } else {
             (&TABLE_GAIN_LOWRATES, cols(&LOWRATES_SOA))
@@ -802,7 +802,7 @@ pub(super) fn mr795_gain_quant(
     let mut cand = [0i16; 3];
     let mut cind = [0i16; 3];
     q_gain_pitch(
-        Mode::MR795,
+        CodecMode::MR795,
         gp_limit,
         gain_pit,
         Some((&mut cand, &mut cind)),
@@ -1176,7 +1176,7 @@ pub(super) fn mr475_gain_quant(
         ov,
     );
     let (sf1_exp_gcode0, sf1_frac_gcode0, _, _) =
-        gc_pred(pred_st, Mode::MR475, sf1_code_nosharp, ov);
+        gc_pred(pred_st, CodecMode::MR475, sf1_code_nosharp, ov);
     let sf1_gcode0 = pow2(14, sf1_frac_gcode0, ov) as i16;
     mr475_quant_store_results(
         pred_st,
@@ -1201,7 +1201,7 @@ pub(crate) struct Gains {
 #[allow(clippy::too_many_arguments)] // mirrors the C signature
 pub(crate) fn gain_quant(
     st: &mut GainQuantState,
-    mode: Mode,
+    mode: CodecMode,
     res: &[i16],
     exc: &[i16],
     code: &[i16],
@@ -1222,7 +1222,7 @@ pub(crate) fn gain_quant(
     let mut frac_coeff = [0i16; 5];
     let mut exp_coeff = [0i16; 5];
     let (mut cod_gain_frac, mut cod_gain_exp) = (0i16, 0i16);
-    if mode == Mode::MR475 {
+    if mode == CodecMode::MR475 {
         if even_subframe {
             st.gain_idx_pos = *ana_pos;
             *ana_pos += 1;
@@ -1303,7 +1303,7 @@ pub(crate) fn gain_quant(
     } else {
         let (exp_gcode0, frac_gcode0, exp_en, frac_en) = gc_pred(&st.gc_pred_st, mode, code, ov);
         let (mut qua_ener_mr122, mut qua_ener) = (0i16, 0i16);
-        if mode == Mode::MR122 {
+        if mode == CodecMode::MR122 {
             gains.gain_cod = g_code(xn2, y2);
             ana[*ana_pos] = q_gain_code(
                 mode,
@@ -1329,7 +1329,7 @@ pub(crate) fn gain_quant(
                 &mut cod_gain_exp,
                 ov,
             );
-            if mode == Mode::MR795 {
+            if mode == CodecMode::MR795 {
                 mr795_gain_quant(
                     &mut st.adapt_st,
                     res,

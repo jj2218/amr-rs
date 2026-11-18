@@ -21,7 +21,7 @@ mod vad2;
 mod vs_ref;
 
 use crate::basic_op::{Flag, add, extract_h, l_mult, l_shl, round, sub};
-use crate::cnst::{L_FRAME, L_INTERPOL, L_SUBFR, M, MP1, Mode, PIT_MAX};
+use crate::cnst::{CodecMode, L_FRAME, L_INTERPOL, L_SUBFR, M, MP1, Mode, PIT_MAX};
 use crate::decoder::MAX_SERIAL_SIZE;
 use crate::dtx::RxFrameType;
 use crate::excitation::pred_lt_3or6;
@@ -184,14 +184,14 @@ impl CodAmr {
 
 /// `pre_big`: weighted speech `wsp` for half a frame (two subframes).
 fn pre_big(
-    mode: Mode,
+    mode: CodecMode,
     a_t: &[i16; 4 * MP1],
     frame_offset: usize,
     old_speech: &[i16; L_TOTAL],
     mem_w: &mut [i16; M],
     old_wsp: &mut [i16],
 ) {
-    let g1 = if mode <= Mode::MR795 {
+    let g1 = if mode <= CodecMode::MR795 {
         &GAMMA1
     } else {
         &GAMMA1_12K2
@@ -216,7 +216,7 @@ fn pre_big(
 /// `exc`) for one subframe. `speech` starts `M` samples before the subframe.
 #[allow(clippy::too_many_arguments)] // mirrors the C signature
 fn subframe_pre_proc(
-    mode: Mode,
+    mode: CodecMode,
     a: &[i16],
     aq: &[i16],
     speech: &[i16],
@@ -227,7 +227,7 @@ fn subframe_pre_proc(
     xn: &mut [i16; L_SUBFR],
     res2: &mut [i16; L_SUBFR],
 ) {
-    let g1 = if matches!(mode, Mode::MR122 | Mode::MR102) {
+    let g1 = if matches!(mode, CodecMode::MR122 | CodecMode::MR102) {
         &GAMMA1_12K2
     } else {
         &GAMMA1
@@ -257,7 +257,7 @@ fn subframe_pre_proc(
 #[allow(clippy::too_many_arguments)] // mirrors the C signature
 fn subframe_post_proc(
     speech: &[i16],
-    mode: Mode,
+    mode: CodecMode,
     i_subfr: usize,
     gain_pit: i16,
     gain_code: i16,
@@ -273,7 +273,7 @@ fn subframe_post_proc(
     exc: &mut [i16],
     sharp: &mut i16,
 ) {
-    let (temp_shift, k_shift, pitch_fac) = if mode != Mode::MR122 {
+    let (temp_shift, k_shift, pitch_fac) = if mode != CodecMode::MR122 {
         (1, 2, gain_pit)
     } else {
         (2, 4, gain_pit >> 1)
@@ -304,10 +304,10 @@ impl CodAmr {
     /// mode (`MRDTX` when DTX decides on a SID/no-data frame).
     fn encode(
         &mut self,
-        mode: Mode,
+        mode: CodecMode,
         new_speech: &[i16; L_FRAME],
         ana: &mut [i16; MAX_PRM_SIZE],
-    ) -> Mode {
+    ) -> CodecMode {
         let ov = &mut self.overflow;
         let mut a_t = [0i16; 4 * MP1];
         let mut aq_t = [0i16; 4 * MP1];
@@ -354,7 +354,7 @@ impl CodAmr {
             ov,
         );
         let mut lsp_flag = false;
-        if used_mode == Mode::MRDTX {
+        if used_mode == CodecMode::MRDTX {
             dtx_enc(
                 &mut self.dtx_enc_st,
                 compute_sid_flag,
@@ -394,7 +394,7 @@ impl CodAmr {
                 &mut self.mem_w,
                 &mut self.old_wsp,
             );
-            if mode != Mode::MR475 && mode != Mode::MR515 {
+            if mode != CodecMode::MR475 && mode != CodecMode::MR515 {
                 t_op[sub_nr] = ol_ltp(
                     &mut self.pitch_ol_wght_st,
                     &mut self.vad_st,
@@ -408,7 +408,7 @@ impl CodAmr {
                 );
             }
         }
-        if mode == Mode::MR475 || mode == Mode::MR515 {
+        if mode == CodecMode::MR475 || mode == CodecMode::MR515 {
             t_op[0] = ol_ltp(
                 &mut self.pitch_ol_wght_st,
                 &mut self.vad_st,
@@ -430,7 +430,7 @@ impl CodAmr {
         }
 
         crate::stages::mark(crate::stages::E_OL);
-        if used_mode != Mode::MRDTX {
+        if used_mode != CodecMode::MRDTX {
             self.subframes(
                 used_mode, &a_t, &aq_t, &t_op, lsp_flag, &mut synth, ana, ana_pos,
             );
@@ -445,7 +445,7 @@ impl CodAmr {
     #[allow(clippy::too_many_arguments)] // the C function's locals
     fn subframes(
         &mut self,
-        mode: Mode,
+        mode: CodecMode,
         a_t: &[i16; 4 * MP1],
         aq_t: &[i16; 4 * MP1],
         t_op: &[i16; 2],
@@ -481,14 +481,14 @@ impl CodAmr {
             let a = &a_t[sub_nr * MP1..];
             let mut aq_off = sub_nr * MP1;
             even = !even;
-            if even && mode == Mode::MR475 {
+            if even && mode == CodecMode::MR475 {
                 mem_syn_save = self.mem_syn;
                 mem_w0_save = self.mem_w0;
                 mem_err_save.copy_from_slice(&self.mem_err[..M]);
                 sharp_save = self.sharp;
             }
             let speech = &self.old_speech[SPEECH + i_subfr - M..];
-            let mem_w0 = if mode != Mode::MR475 {
+            let mem_w0 = if mode != CodecMode::MR475 {
                 &self.mem_w0
             } else {
                 &mem_w0_save
@@ -506,7 +506,7 @@ impl CodAmr {
                 &mut res,
             );
             crate::stages::mark(crate::stages::E_SUB_PRE);
-            if mode == Mode::MR475 && even {
+            if mode == CodecMode::MR475 && even {
                 h1_sf0 = self.h1;
             }
             res2 = res;
@@ -579,7 +579,7 @@ impl CodAmr {
             crate::stages::mark(crate::stages::E_GAIN);
             update_gp_clipping(&mut self.ton_stab_st, g.gain_pit);
             let speech = &self.old_speech[SPEECH..];
-            if mode != Mode::MR475 {
+            if mode != CodecMode::MR475 {
                 subframe_post_proc(
                     speech,
                     mode,
@@ -709,17 +709,17 @@ impl CodAmr {
 }
 
 /// `Prm2bits`: parameters to serial bits (MSB first per parameter).
-fn prm2bits(mode: Mode, prm: &[i16; MAX_PRM_SIZE], bits: &mut [i16; MAX_SERIAL_SIZE]) {
+fn prm2bits(mode: CodecMode, prm: &[i16; MAX_PRM_SIZE], bits: &mut [i16; MAX_SERIAL_SIZE]) {
     let bitno: &[i16] = match mode {
-        Mode::MR475 => &BITNO_MR475,
-        Mode::MR515 => &BITNO_MR515,
-        Mode::MR59 => &BITNO_MR59,
-        Mode::MR67 => &BITNO_MR67,
-        Mode::MR74 => &BITNO_MR74,
-        Mode::MR795 => &BITNO_MR795,
-        Mode::MR102 => &BITNO_MR102,
-        Mode::MR122 => &BITNO_MR122,
-        Mode::MRDTX => &BITNO_MRDTX,
+        CodecMode::MR475 => &BITNO_MR475,
+        CodecMode::MR515 => &BITNO_MR515,
+        CodecMode::MR59 => &BITNO_MR59,
+        CodecMode::MR67 => &BITNO_MR67,
+        CodecMode::MR74 => &BITNO_MR74,
+        CodecMode::MR795 => &BITNO_MR795,
+        CodecMode::MR102 => &BITNO_MR102,
+        CodecMode::MR122 => &BITNO_MR122,
+        CodecMode::MRDTX => &BITNO_MRDTX,
     };
     let mut pos = 0;
     for (&value, &n) in prm.iter().zip(&bitno[..PRMNO[mode as usize] as usize]) {
@@ -790,22 +790,21 @@ impl Encoder {
         self.sid.reset();
     }
 
-    /// Encodes one frame at `mode`. With DTX the result can be a SID (`SidFirst`/`SidUpdate`,
-    /// `mode` is then the mode indication) or `NoData` frame.
-    ///
-    /// # Panics
-    /// If `mode` is [`Mode::MRDTX`] (not a codec rate; DTX is enabled in [`Encoder::new`]).
+    /// Encodes one frame at `mode`. The frame's serial bits, one per element (0 or 1, zero past
+    /// the frame's size) in TS 26.073 parameter order, as [`crate::Decoder::decode`] reads
+    /// them: `mode.bits()` for a speech frame, [`crate::SID_BITS`] for a SID frame. With DTX
+    /// the frame can be `SidFirst`, `SidUpdate` or `NoData` (`mode` is then the mode
+    /// indication); as in the reference's output, `SidFirst` and `NoData` frames also carry
+    /// the comfort-noise analysis in their first [`crate::SID_BITS`] bits, which are not
+    /// transmitted (a SID_FIRST frame's parameters are unused: [`crate::rfc4867`] writes them as
+    /// zeros; a NO_DATA frame is not sent).
     pub fn encode(&mut self, mode: Mode, pcm: &[i16; L_FRAME]) -> Frame {
-        assert!(
-            mode != Mode::MRDTX,
-            "MRDTX is not an encoder rate; enable DTX in Encoder::new"
-        );
         crate::stages::start();
         let homing = pcm.iter().all(|&s| s == EHF);
         let mut speech = pcm.map(|s| s & !7);
         pre_process(&mut self.pre, &mut speech);
         let mut prm = [0i16; MAX_PRM_SIZE];
-        let used_mode = self.cod.encode(mode, &speech, &mut prm);
+        let used_mode = self.cod.encode(mode.into(), &speech, &mut prm);
         let mut bits = [0i16; MAX_SERIAL_SIZE];
         prm2bits(used_mode, &prm, &mut bits);
         let frame_type = match sid_sync(&mut self.sid, used_mode) {
@@ -844,7 +843,7 @@ mod tests {
     fn homing_frame_resets_the_encoder() {
         let mut g = Rng::new(1);
         for dtx in [Dtx::Off, Dtx::Vad1, Dtx::Vad2] {
-            for &mode in &Mode::ALL[..8] {
+            for mode in Mode::ALL {
                 let mut used = Encoder::new(dtx);
                 for _ in 0..20 {
                     let pcm: [i16; L_FRAME] = std::array::from_fn(|_| g.i16() >> 2);
@@ -857,7 +856,7 @@ mod tests {
                     assert_eq!(
                         used.encode(mode, &pcm),
                         fresh.encode(mode, &pcm),
-                        "{dtx:?} {mode}"
+                        "{dtx:?} {mode:?}"
                     );
                 }
             }

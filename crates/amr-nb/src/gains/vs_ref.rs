@@ -377,7 +377,7 @@ fn gc_pred_vs_ref() {
             r.reset();
             unsafe { ref_gc_pred_reset(&mut c) };
         }
-        let mode = Mode::ALL[(g.u64() % 8) as usize];
+        let mode = CodecMode::ALL[(g.u64() % 8) as usize];
         let mut code = code_vec(&mut g);
         let mut ro = false;
         let out = gc_pred(&r, mode, &code, &mut ro);
@@ -414,7 +414,7 @@ fn gc_pred_vs_ref() {
 #[test]
 fn d_gain_pitch_vs_ref() {
     let t = c_tbls();
-    for mode in Mode::ALL {
+    for mode in CodecMode::ALL {
         for index in 0..16 {
             let c = unsafe { c_d_gain_pitch(mode as i32, index, t[TBL_QUA_GAIN_PITCH]) };
             assert_eq!(
@@ -442,7 +442,7 @@ fn d_gain_code_vs_ref() {
         let mode = if g.u64() & 1 == 0 {
             [MR795, MR122][(g.u64() % 2) as usize]
         } else {
-            Mode::ALL[(g.u64() % 8) as usize]
+            CodecMode::ALL[(g.u64() % 8) as usize]
         };
         // The reference indexes its table with the raw index: in range only.
         let index = range(&mut g, 0, 31);
@@ -698,7 +698,7 @@ fn cb_gain_average_vs_ref() {
         }
         // Regimes of ~60 frames: fixed mode, stationary/non-stationary spectrum.
         if k % 60 == 0 {
-            mode = Mode::ALL[(g.u64() % 9) as usize];
+            mode = CodecMode::ALL[(g.u64() % 9) as usize];
             noise = [0, 30, 300, 3000, 20000][(g.u64() % 5) as usize];
             for (i, x) in lsp_aver.iter_mut().enumerate() {
                 *x = if g.u64().is_multiple_of(16) {

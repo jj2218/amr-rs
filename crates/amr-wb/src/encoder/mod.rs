@@ -36,7 +36,7 @@ pub(crate) mod kernels {
     pub(crate) use super::preprocess::{NB_COEF_DOWN, decim_12k8_portable};
 }
 
-use crate::cnst::{EHF_MASK, L_FRAME16K, MAX_SERIAL_SIZE, Mode, RxFrameType};
+use crate::cnst::{EHF_MASK, L_FRAME, MAX_SERIAL_SIZE, Mode, RxFrameType};
 use crate::rfc4867::Frame;
 use bits::BIT_1;
 use coder::CoderState;
@@ -67,6 +67,16 @@ impl From<TxFrameType> for RxFrameType {
     }
 }
 
+/// Discontinuous transmission (TS 26.193) and the voice activity detector (TS 26.194) it uses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Dtx {
+    /// Every frame is a speech frame.
+    #[default]
+    Off,
+    /// DTX with voice activity detection.
+    On,
+}
+
 /// AMR-WB encoder: 16 kHz, 16-bit PCM frames of 320 samples to serial bits, as the TS 26.173
 /// reference encoder's frame loop (`coder.c`): the input is taken at 14 bits (the 2 LSBs
 /// cleared), an encoder homing frame resets the encoder after it is coded, and with DTX the
@@ -74,17 +84,17 @@ impl From<TxFrameType> for RxFrameType {
 /// of [`crate::rfc4867::Frame`], ready for packing or decoding.
 ///
 /// ```
-/// use amr_wb::{Decoder, Encoder, L_FRAME16K, Mode, RxFrameType};
+/// use amr_wb::{Decoder, Dtx, Encoder, L_FRAME, Mode, RxFrameType};
 ///
-/// let mut enc = Encoder::new(true); // with DTX
+/// let mut enc = Encoder::new(Dtx::On);
 /// let mut dec = Decoder::new();
-/// let tone: [i16; L_FRAME16K] = std::array::from_fn(|n| ((n as f64 * 0.3).sin() * 8000.0) as i16);
+/// let tone: [i16; L_FRAME] = std::array::from_fn(|n| ((n as f64 * 0.3).sin() * 8000.0) as i16);
 /// let f = enc.encode(Mode::MD1265, &tone);
 /// assert_eq!(f.frame_type, RxFrameType::SpeechGood);
-/// let mut out = [0i16; L_FRAME16K];
+/// let mut out = [0i16; L_FRAME];
 /// dec.decode(f.frame_type, f.mode, &f.bits, &mut out);
 /// // silence: after the VAD's hangover, comfort noise (SID) and NO_DATA frames
-/// let types: Vec<_> = (0..30).map(|_| enc.encode(Mode::MD1265, &[0; L_FRAME16K]).frame_type).collect();
+/// let types: Vec<_> = (0..30).map(|_| enc.encode(Mode::MD1265, &[0; L_FRAME]).frame_type).collect();
 /// assert!(types.contains(&RxFrameType::SidFirst) && types[29] == RxFrameType::NoData);
 /// ```
 #[derive(Clone)]
@@ -97,12 +107,12 @@ pub struct Encoder {
 }
 
 impl Encoder {
-    /// An encoder in its initial (homed) state; `dtx` enables voice activity detection and
-    /// discontinuous transmission (comfort noise).
-    pub fn new(dtx: bool) -> Self {
+    /// An encoder in its initial (homed) state; `dtx` selects discontinuous transmission
+    /// (comfort noise) with voice activity detection.
+    pub fn new(dtx: Dtx) -> Self {
         Self {
             st: Box::new(CoderState::new()),
-            dtx,
+            dtx: dtx == Dtx::On,
             sid_update_counter: 3,
             prev_ft: TxFrameType::Speech,
         }
@@ -123,10 +133,10 @@ impl Encoder {
     /// the comfort-noise analysis in their first [`crate::SID_BITS`] bits, which are not
     /// transmitted (a SID_FIRST frame's parameters are unused: [`crate::rfc4867`] writes them as
     /// zeros; a NO_DATA frame is not sent).
-    pub fn encode(&mut self, mode: Mode, speech: &[i16; L_FRAME16K]) -> Frame {
+    pub fn encode(&mut self, mode: Mode, pcm: &[i16; L_FRAME]) -> Frame {
         crate::stages::start();
-        let homing = speech.iter().all(|&s| s == EHF_MASK);
-        let signal = speech.map(|s| s & !3);
+        let homing = pcm.iter().all(|&s| s == EHF_MASK);
+        let signal = pcm.map(|s| s & !3);
         let mut prms = [0i16; MAX_SERIAL_SIZE];
         let (used, n) = self.st.coder(mode as i16, &signal, &mut prms, self.dtx);
         if homing {
@@ -165,5 +175,12 @@ impl Encoder {
         };
         self.prev_ft = ft;
         ft
+    }
+}
+
+impl Default for Encoder {
+    /// An encoder without DTX.
+    fn default() -> Self {
+        Self::new(Dtx::Off)
     }
 }

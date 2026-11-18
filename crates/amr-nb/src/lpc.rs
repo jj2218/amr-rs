@@ -16,7 +16,7 @@ use crate::tables::{
     TABLE,
 };
 
-pub(crate) use crate::cnst::{M, MP1, Mode};
+pub(crate) use crate::cnst::{CodecMode, M, MP1};
 /// `LSF_GAP` in cnst.h.
 const LSF_GAP: i16 = 205;
 /// `LSP_PRED_FAC_MR122` in cnst.h.
@@ -310,7 +310,7 @@ pub(crate) fn init_d_plsf_3(st: &mut DPlsfState, index: i16) {
 /// `D_plsf_3`: decode the 3 split-VQ LSF indices (all modes except MR122) into `lsp1_q`.
 pub(crate) fn d_plsf_3(
     st: &mut DPlsfState,
-    mode: Mode,
+    mode: CodecMode,
     bfi: i16,
     indice: &[i16],
     lsp1_q: &mut [i16],
@@ -327,7 +327,7 @@ pub(crate) fn d_plsf_3(
             let index = mult(MEAN_LSF_3[i], ONE_ALPHA, ov);
             lsf1_q[i] = add(index, temp, ov);
         }
-        if mode != Mode::MRDTX {
+        if mode != CodecMode::MRDTX {
             for i in 0..M {
                 let mut temp = mult(st.past_r_q[i], PRED_FAC_3[i], ov);
                 temp = add(MEAN_LSF_3[i], temp, ov);
@@ -343,14 +343,14 @@ pub(crate) fn d_plsf_3(
         let index_limit_2: i16 = (DICO2_SIZE - 1) * 3;
         let p_cb2: &[i16] = &DICO2_LSF_3;
         let (p_cb1, p_cb3, index_limit_1, index_limit_3): (&[i16], &[i16], i16, i16) =
-            if mode == Mode::MR475 || mode == Mode::MR515 {
+            if mode == CodecMode::MR475 || mode == CodecMode::MR515 {
                 (
                     &DICO1_LSF_3,
                     &MR515_3_LSF,
                     (DICO1_SIZE - 1) * 3,
                     (MR515_3_SIZE - 1) * 4,
                 )
-            } else if mode == Mode::MR795 {
+            } else if mode == CodecMode::MR795 {
                 (
                     &MR795_1_LSF,
                     &DICO3_LSF_3,
@@ -375,7 +375,7 @@ pub(crate) fn d_plsf_3(
         lsf1_r[0..3].copy_from_slice(&p_cb1[p..p + 3]);
 
         index = indice[1];
-        if mode == Mode::MR475 || mode == Mode::MR515 {
+        if mode == CodecMode::MR475 || mode == CodecMode::MR515 {
             index = index.wrapping_shl(1);
         }
         temp = index.wrapping_add(index.wrapping_shl(1));
@@ -393,7 +393,7 @@ pub(crate) fn d_plsf_3(
         let p = temp as usize;
         lsf1_r[6..10].copy_from_slice(&p_cb3[p..p + 4]);
 
-        if mode != Mode::MRDTX {
+        if mode != CodecMode::MRDTX {
             for i in 0..M {
                 let mut temp = mult(st.past_r_q[i], PRED_FAC_3[i], ov);
                 temp = add(MEAN_LSF_3[i], temp, ov);
@@ -670,16 +670,16 @@ mod vs_ref {
         t
     }
 
-    const MODES: [Mode; 9] = [
-        Mode::MR475,
-        Mode::MR515,
-        Mode::MR59,
-        Mode::MR67,
-        Mode::MR74,
-        Mode::MR795,
-        Mode::MR102,
-        Mode::MR122,
-        Mode::MRDTX,
+    const MODES: [CodecMode; 9] = [
+        CodecMode::MR475,
+        CodecMode::MR515,
+        CodecMode::MR59,
+        CodecMode::MR67,
+        CodecMode::MR74,
+        CodecMode::MR795,
+        CodecMode::MR102,
+        CodecMode::MR122,
+        CodecMode::MRDTX,
     ];
 
     /// Random LSF vector in the `Lsf_lsp` domain (0..=16383); sorted (realistic) or not.
@@ -894,8 +894,8 @@ mod vs_ref {
                 // The indices the mode's bitstream carries (8/8/7, 9/9/9 or 8/9/9 bits): the
                 // reference reads its tables unchecked (opencore's clamp has no spec meaning).
                 let bits: [u32; 3] = match mode {
-                    Mode::MR475 | Mode::MR515 => [8, 8, 7],
-                    Mode::MR795 => [9, 9, 9],
+                    CodecMode::MR475 | CodecMode::MR515 => [8, 8, 7],
+                    CodecMode::MR795 => [9, 9, 9],
                     _ => [8, 9, 9],
                 };
                 let indice: [i16; 3] = std::array::from_fn(|k| (g.u64() % (1 << bits[k])) as i16);

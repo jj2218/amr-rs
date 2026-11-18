@@ -10,7 +10,7 @@
 //! SPEECH_LOST.
 #![no_main]
 
-use amr_wb::{Decoder, L_FRAME16K, MAX_SERIAL_SIZE, Mode, RxFrameType, SID_BITS};
+use amr_wb::{Decoder, L_FRAME, MAX_SERIAL_SIZE, Mode, RxFrameType, SID_BITS};
 use libfuzzer_sys::fuzz_target;
 
 const TYPES: [RxFrameType; 8] = [
@@ -52,10 +52,10 @@ fuzz_target!(|data: &[u8]| {
                 0
             }
         });
-        let mut r = [0i16; L_FRAME16K];
+        let mut r = [0i16; L_FRAME];
         rust.decode(ft, mode, &bits, &mut r);
         let mut prms = bits.map(|b| if b != 0 { 127 } else { -127 });
-        let mut cpcm = [0i16; L_FRAME16K];
+        let mut cpcm = [0i16; L_FRAME];
         c.decode(mode as i16, ft as i16, &mut prms, &mut cpcm);
         assert_eq!(r, cpcm, "frame {i}: {ft:?} {mode:?}");
     }

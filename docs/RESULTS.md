@@ -204,7 +204,8 @@ plus FFI in the tests.
 
 ## amr-wb (AMR-WB decoder)
 The AMR-WB decoder (3GPP TS 26.173, ITU-T G.722.2), ported from opencore-amr 0.1.6's decoder
-and corrected to the specification wherever the two differ (below). No `unsafe`.
+and corrected to the specification wherever the two differ (below). The only `unsafe` is
+`src/simd.rs` (runtime AVX2 dispatch, AVX2 kernels).
 
 ### Conformance (`just conform`)
 The whole decoder set of 3GPP TS 26.174 v19.0.0 (j00, its latest version): every `.cod` with
@@ -348,7 +349,7 @@ follow-on filters run beside them per block.
 The AMR-WB encoder, ported from vo-amrwbenc 0.1.3 (Apache-2.0) module by module, with the
 saturation of the TS 26.173 reference (vo's `vo_*` macros and plain sums wrap where it
 saturates), including CR 26.173-0032 (pitch-gain clipping at 6.60/8.85 kbit/s) and -0036
-(`c4t64fx` impulse-response scaling), which vo-amrwbenc predates. No `unsafe`.
+(`c4t64fx` impulse-response scaling), which vo-amrwbenc predates.
 
 ### Conformance (`cargo test --release -p amr-wb --test enc_conformance`)
 The whole encoder set of 3GPP TS 26.174 v19.0.0: every `.inp` with its `.cod` (T00–T21 in each

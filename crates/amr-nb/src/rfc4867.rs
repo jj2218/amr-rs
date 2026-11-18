@@ -3,8 +3,10 @@
 //!
 //! Supported: single channel; RTP without interleaving, CRCs or robust sorting (the SDP
 //! defaults). Speech bits are carried in the class-sorted order of TS 26.101 (opencore's
-//! `wmf_to_ets`/`ets_to_wmf` tables); a SID frame carries 35 comfort-noise bits, the SID type
-//! indicator (STI) and a 3-bit mode indication (least significant bit first).
+//! `wmf_to_ets`/`ets_to_wmf` tables); a SID frame (frame type 8) carries 35 comfort-noise
+//! bits, the SID type indicator (STI) and a 3-bit mode indication (least significant bit
+//! first); a SID_FIRST frame's comfort-noise bits are written as zeros (TS 26.101 4.2.3;
+//! decoders don't use them).
 //!
 //! ```
 //! use amr_nb::{Decoder, rfc4867};
@@ -18,15 +20,13 @@
 //! # Ok::<(), rfc4867::Error>(())
 //! ```
 
-use crate::{MAX_SERIAL_SIZE, Mode, RxFrameType, tables};
+use crate::{MAX_SERIAL_SIZE, Mode, RxFrameType, SID_BITS, tables};
 
 /// Magic number that starts a single-channel `.amr` file.
 pub const STORAGE_MAGIC: &[u8; 6] = b"#!AMR\n";
 
 const FT_SID: u8 = 8;
 const FT_NO_DATA: u8 = 15;
-/// Comfort-noise parameter bits of a SID frame (STI and mode indication follow).
-const SID_PARAM_BITS: usize = 35;
 /// CMR value for "no mode request".
 const CMR_NONE: u32 = 15;
 
@@ -73,8 +73,8 @@ pub enum Error {
     /// Frame type 9..=14 (other codecs' SID, or reserved). RFC 4867 §4.3.2: discard the packet.
     /// In a file, frames of types 9..=11 (known size) are skipped and reading continues.
     UnsupportedFrameType(u8),
-    /// Writing: `Onset`/`SpeechDegraded`, a speech or SID frame with mode `MRDTX`, or an RTP
-    /// packet with no frames; none of these has a packed form.
+    /// Writing: an `Onset` or `SpeechDegraded` frame, or an RTP packet with no frames; none
+    /// of these has a packed form.
     NotPackable,
 }
 
@@ -172,7 +172,7 @@ pub fn read_rtp(
         }
     };
     need(&r, 4)?;
-    let cmr = Mode::ALL[..8].get(r.get(4) as usize).copied();
+    let cmr = Mode::from_index(r.get(4) as usize);
     let mut toc = Vec::new();
     loop {
         if oa {
@@ -209,7 +209,7 @@ pub fn read_rtp(
 }
 
 /// Writes one RTP payload carrying `frames` (at least one) and the codec mode request `cmr`
-/// (`None` or `MRDTX`: no request).
+/// (`None`: no request).
 ///
 /// ```
 /// use amr_nb::{Encoder, Dtx, Mode, rfc4867::{self, Packing}};
@@ -234,13 +234,7 @@ pub fn write_rtp(cmr: Option<Mode>, frames: &[Frame], packing: Packing) -> Resul
         .map(frame_header)
         .collect::<Result<Vec<_>, _>>()?;
     let mut w = BitWriter::default();
-    w.put(
-        match cmr {
-            Some(m) if m != Mode::MRDTX => m as u32,
-            _ => CMR_NONE,
-        },
-        4,
-    );
+    w.put(cmr.map_or(CMR_NONE, |m| m as u32), 4);
     for (i, &(ft, q)) in headers.iter().enumerate() {
         if oa {
             w.align();
@@ -261,16 +255,12 @@ pub fn write_rtp(cmr: Option<Mode>, frames: &[Frame], packing: Packing) -> Resul
 /// Frame type (FT) and quality bit (Q) for `f`.
 fn frame_header(f: &Frame) -> Result<(u8, bool), Error> {
     use RxFrameType::*;
-    let speech_mode = || match f.mode {
-        Mode::MRDTX => Err(Error::NotPackable),
-        m => Ok(m as u8),
-    };
     match f.frame_type {
-        SpeechGood => Ok((speech_mode()?, true)),
-        SpeechBad => Ok((speech_mode()?, false)),
-        SidFirst | SidUpdate => speech_mode().map(|_| (FT_SID, true)),
+        SpeechGood => Ok((f.mode as u8, true)),
+        SpeechBad => Ok((f.mode as u8, false)),
+        SidFirst | SidUpdate => Ok((FT_SID, true)),
         // Written with STI = 1 (a bad SID's type is unknown).
-        SidBad => speech_mode().map(|_| (FT_SID, false)),
+        SidBad => Ok((FT_SID, false)),
         NoData => Ok((FT_NO_DATA, true)),
         Onset | SpeechDegraded => Err(Error::NotPackable),
     }
@@ -313,7 +303,7 @@ fn read_frame(r: &mut BitReader, ft: u8, q: bool) -> Frame {
             };
         }
         FT_SID => {
-            for b in &mut f.bits[..SID_PARAM_BITS] {
+            for b in &mut f.bits[..SID_BITS] {
                 *b = r.get(1) as i16;
             }
             let sti = r.get(1);
@@ -340,8 +330,10 @@ fn write_frame(w: &mut BitWriter, f: &Frame, ft: u8) {
             }
         }
         FT_SID => {
-            for &b in &f.bits[..SID_PARAM_BITS] {
-                w.put(b as u32 & 1, 1);
+            // TS 26.101 4.2.3: a SID_FIRST frame's comfort-noise bits are set to 0.
+            let first = f.frame_type == RxFrameType::SidFirst;
+            for &b in &f.bits[..SID_BITS] {
+                w.put(if first { 0 } else { b as u32 & 1 }, 1);
             }
             w.put(u32::from(f.frame_type != RxFrameType::SidFirst), 1);
             w.put((f.mode as u32).reverse_bits() >> 29, 3);
@@ -422,8 +414,8 @@ mod tests {
     pub(super) fn random_frame(g: &mut Rng, frame_type: RxFrameType, mode: Mode) -> Frame {
         let n = match frame_type {
             NoData => 0,
-            SidFirst | SidUpdate | SidBad => SID_PARAM_BITS,
-            _ => tables::NUMOFBITS[mode as usize] as usize,
+            SidFirst | SidUpdate | SidBad => SID_BITS,
+            _ => mode.bits(),
         };
         let mut f = Frame::no_data();
         if frame_type != NoData {
@@ -436,11 +428,20 @@ mod tests {
         f
     }
 
+    /// `f` as the writers send it: a SID_FIRST frame's comfort-noise bits zeroed.
+    pub(super) fn as_written(f: &Frame) -> Frame {
+        let mut f = f.clone();
+        if f.frame_type == SidFirst {
+            f.bits[..SID_BITS].fill(0);
+        }
+        f
+    }
+
     /// Every packable frame: 8 speech modes × good/bad, SID first/update/bad × 8 mode
     /// indications, and NO_DATA.
     fn all_kinds(g: &mut Rng) -> Vec<Frame> {
         let mut v = vec![Frame::no_data()];
-        for m in Mode::ALL[..8].iter().copied() {
+        for m in Mode::ALL {
             for t in [SpeechGood, SpeechBad, SidFirst, SidUpdate, SidBad] {
                 v.push(random_frame(g, t, m));
             }
@@ -454,18 +455,22 @@ mod tests {
         for _ in 0..200 {
             let frames = all_kinds(&mut g);
             let file = write_storage(&frames).unwrap();
-            assert_eq!(storage(&file).unwrap(), frames, "storage");
+            let sent: Vec<Frame> = frames.iter().map(as_written).collect();
+            assert_eq!(storage(&file).unwrap(), sent, "storage");
             for packing in [Packing::OctetAligned, Packing::BandwidthEfficient] {
                 // Single frames, then packets of 1..=4 mixed frames.
                 for f in &frames {
                     let p = write_rtp(Some(f.mode), std::slice::from_ref(f), packing).unwrap();
-                    assert_eq!(rtp(&p, packing).unwrap(), (Some(f.mode), vec![f.clone()]));
+                    assert_eq!(
+                        rtp(&p, packing).unwrap(),
+                        (Some(f.mode), vec![as_written(f)])
+                    );
                 }
                 for chunk in frames.chunks(1 + (g.u64() % 4) as usize) {
                     let p = write_rtp(None, chunk, packing).unwrap();
                     assert_eq!(
                         rtp(&p, packing).unwrap(),
-                        (None, chunk.to_vec()),
+                        (None, chunk.iter().map(as_written).collect()),
                         "{packing:?}"
                     );
                 }
@@ -475,6 +480,18 @@ mod tests {
 
     #[test]
     fn sizes_match_opencore_and_rfc() {
+        // TS 26.101 table 3: a SID frame is the comfort-noise bits, STI and mode indication.
+        assert_eq!(
+            tables::NUMOFBITS[FT_SID as usize] as usize,
+            SID_BITS + 1 + 3
+        );
+        let speech = [95, 103, 118, 134, 148, 159, 204, 244]; // TS 26.101 table 2
+        assert!(Mode::ALL.iter().map(|m| m.bits()).eq(speech));
+        assert!(
+            (0..9)
+                .map(Mode::from_index)
+                .eq(Mode::ALL.map(Some).into_iter().chain([None]))
+        );
         let mut g = Rng::new(1);
         for f in all_kinds(&mut g) {
             let (ft, _) = frame_header(&f).unwrap();
@@ -618,12 +635,7 @@ mod tests {
         }
         // Invalid CMR values are ignored.
         assert_eq!(rtp(&[0x80, 0x7c], Packing::OctetAligned).unwrap().0, None);
-        for (t, m) in [
-            (Onset, Mode::MR122),
-            (SpeechDegraded, Mode::MR122),
-            (SpeechGood, Mode::MRDTX),
-            (SidUpdate, Mode::MRDTX),
-        ] {
+        for (t, m) in [(Onset, Mode::MR122), (SpeechDegraded, Mode::MR122)] {
             let mut f = Frame::no_data();
             f.frame_type = t;
             f.mode = m;
@@ -734,14 +746,22 @@ mod vs_c {
         v
     }
 
-    /// Our writer reproduces opencore's packed encoder output byte for byte.
+    /// Our writer reproduces opencore's packed encoder output byte for byte, except that a
+    /// SID_FIRST frame's comfort-noise bits are zeros (TS 26.101 4.2.3; opencore sends them).
     #[test]
     fn write_storage_matches_opencore_encoder() {
         for (i, (f, packed)) in opencore_stream(4000).iter().enumerate() {
             let ours = write_storage(std::slice::from_ref(f)).unwrap();
+            let mut expected = packed.clone();
+            if f.frame_type == RxFrameType::SidFirst {
+                // After the header octet: 35 comfort-noise bits, most significant first.
+                for k in 0..SID_BITS {
+                    expected[1 + k / 8] &= !(0x80 >> (k % 8));
+                }
+            }
             assert_eq!(
                 &ours[STORAGE_MAGIC.len()..],
-                packed,
+                expected,
                 "frame {i}: {:?} {:?}",
                 f.frame_type,
                 f.mode

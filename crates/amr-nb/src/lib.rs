@@ -63,7 +63,7 @@ mod tables;
 
 pub mod rfc4867;
 
-pub use cnst::Mode;
+pub use cnst::{L_FRAME, Mode, SID_BITS};
 pub use decoder::{Decoder, MAX_SERIAL_SIZE, RxFrameType};
 pub use encoder::{Dtx, Encoder};
 

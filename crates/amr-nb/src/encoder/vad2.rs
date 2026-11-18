@@ -9,7 +9,7 @@ use crate::basic_op::{
     Flag, abs_s, add, div_s, l_add, l_extract, l_mac, l_msu, l_mult, l_negate, l_shl, l_shr,
     l_shr_r, l_sub, mpy_32_16, mult, mult_r, norm_s, round, shl, shr, shr_r, sub,
 };
-use crate::cnst::Mode;
+use crate::cnst::CodecMode;
 use crate::math::{log2, pow2};
 use crate::tables::{
     BURSTCOUNT_TABLE, CH_TBL_SH, HANGOVER_TABLE, II_TABLE, PHS_TBL, VM_TBL, VM_THRESHOLD_TABLE,
@@ -437,10 +437,10 @@ pub(crate) fn vad2(farray: &[i16], st: &mut Vad2State, ov: &mut Flag) -> bool {
 }
 
 /// `LTP_flag_update`: whether the open-loop pitch gain of the frame exceeds a mode threshold.
-pub(crate) fn ltp_flag_update(st: &mut Vad2State, mode: Mode, ov: &mut Flag) {
+pub(crate) fn ltp_flag_update(st: &mut Vad2State, mode: CodecMode, ov: &mut Flag) {
     let thresh = match mode {
-        Mode::MR475 | Mode::MR515 => 18022,
-        Mode::MR102 => 19660,
+        CodecMode::MR475 | CodecMode::MR515 => 18022,
+        CodecMode::MR102 => 19660,
         _ => 21299,
     };
     let (hi, lo) = l_extract(st.l_r0, ov);

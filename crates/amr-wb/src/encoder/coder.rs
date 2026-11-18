@@ -86,7 +86,7 @@ pub(crate) struct CoderState {
     mem_decim: [i16; 2 * L_FILT16K],
     mem_sig_in: [i16; 6],
     mem_preemph: i16,
-    old_speech: [i16; L_TOTAL - L_FRAME],
+    old_speech: [i16; L_TOTAL - L_FRAME12K8],
     old_wsp: [i16; OLD_WSP],
     old_exc: [i16; OLD_EXC],
     mem_levinson: [i16; M + 2],
@@ -110,7 +110,7 @@ pub(crate) struct CoderState {
     ol_wght_flg: i16,
     old_ol_lag: [i16; 5],
     hp_wsp_mem: [i16; 9],
-    old_hp_wsp: [i16; L_FRAME / OPL_DECIM + OLD_WSP],
+    old_hp_wsp: [i16; L_FRAME12K8 / OPL_DECIM + OLD_WSP],
     vad: VadState,
     dtx: DtxEncState,
     first_frame: bool,
@@ -135,7 +135,7 @@ impl CoderState {
             mem_decim: [0; 2 * L_FILT16K],
             mem_sig_in: [0; 6],
             mem_preemph: 0,
-            old_speech: [0; L_TOTAL - L_FRAME],
+            old_speech: [0; L_TOTAL - L_FRAME12K8],
             old_wsp: [0; OLD_WSP],
             old_exc: [0; OLD_EXC],
             mem_levinson: [0; M + 2],
@@ -159,7 +159,7 @@ impl CoderState {
             ol_wght_flg: 0,
             old_ol_lag: [40; 5],
             hp_wsp_mem: [0; 9],
-            old_hp_wsp: [0; L_FRAME / OPL_DECIM + OLD_WSP],
+            old_hp_wsp: [0; L_FRAME12K8 / OPL_DECIM + OLD_WSP],
             vad: VadState::new(),
             dtx: DtxEncState::new(&ISF_INIT),
             first_frame: true,
@@ -193,7 +193,7 @@ impl CoderState {
         self.gp_clip = GP_CLIP_INIT;
         self.l_gc_thres = 0;
         if reset_all {
-            self.old_speech = [0; L_TOTAL - L_FRAME];
+            self.old_speech = [0; L_TOTAL - L_FRAME12K8];
             self.old_wsp = [0; OLD_WSP];
             self.mem_decim2 = [0; 3];
             self.mem_decim = [0; 2 * L_FILT16K];
@@ -214,7 +214,7 @@ impl CoderState {
             self.ada_w = 0;
             self.ol_wght_flg = 0;
             self.old_ol_lag = [40; 5];
-            self.old_hp_wsp = [0; L_FRAME / OPL_DECIM + OLD_WSP];
+            self.old_hp_wsp = [0; L_FRAME12K8 / OPL_DECIM + OLD_WSP];
             self.mem_syn_hf = [0; M];
             self.mem_syn_hi = [0; M];
             self.mem_syn_lo = [0; M];
@@ -264,7 +264,7 @@ impl CoderState {
     pub(crate) fn coder(
         &mut self,
         mode: i16,
-        speech16k: &[i16; L_FRAME16K],
+        speech16k: &[i16; L_FRAME],
         prms: &mut [i16; MAX_SERIAL_SIZE],
         allow_dtx: bool,
     ) -> (i16, usize) {
@@ -272,43 +272,43 @@ impl CoderState {
         let mut ser_size = NB_OF_BITS[mode as usize];
         let codec_mode = mode;
         let mut prms = Serial::new(prms);
-        // old_speech: [past (L_TOTAL - L_FRAME), new frame]; speech, new_speech, the window
+        // old_speech: [past (L_TOTAL - L_FRAME12K8), new frame]; speech, new_speech, the window
         let mut old_speech = [0i16; L_TOTAL];
-        const NEW_SPEECH: usize = L_TOTAL - L_FRAME - L_FILT;
-        const SPEECH: usize = L_TOTAL - L_FRAME - L_NEXT;
-        let mut old_wsp = [0i16; L_FRAME + OLD_WSP];
+        const NEW_SPEECH: usize = L_TOTAL - L_FRAME12K8 - L_FILT;
+        const SPEECH: usize = L_TOTAL - L_FRAME12K8 - L_NEXT;
+        let mut old_wsp = [0i16; L_FRAME12K8 + OLD_WSP];
         const WSP: usize = OLD_WSP;
-        let mut old_exc = [0i16; (L_FRAME + 1) + OLD_EXC];
+        let mut old_exc = [0i16; (L_FRAME12K8 + 1) + OLD_EXC];
         const EXC: usize = OLD_EXC;
-        old_speech[..L_TOTAL - L_FRAME].copy_from_slice(&self.old_speech);
+        old_speech[..L_TOTAL - L_FRAME12K8].copy_from_slice(&self.old_speech);
         old_wsp[..OLD_WSP].copy_from_slice(&self.old_wsp);
         old_exc[..OLD_EXC].copy_from_slice(&self.old_exc);
 
         // 16 kHz → 12.8 kHz, then L_FILT lookahead samples from zeros (autocorrelation only)
         decim_12k8(
             speech16k,
-            &mut old_speech[NEW_SPEECH..NEW_SPEECH + L_FRAME],
+            &mut old_speech[NEW_SPEECH..NEW_SPEECH + L_FRAME12K8],
             &mut self.mem_decim,
         );
         let mut mem = self.mem_decim;
         decim_12k8(
             &[0; L_FILT16K],
-            &mut old_speech[NEW_SPEECH + L_FRAME..],
+            &mut old_speech[NEW_SPEECH + L_FRAME12K8..],
             &mut mem,
         );
         highpass_50hz_at_12k8(
-            &mut old_speech[NEW_SPEECH..NEW_SPEECH + L_FRAME],
+            &mut old_speech[NEW_SPEECH..NEW_SPEECH + L_FRAME12K8],
             &mut self.mem_sig_in,
         );
         let mut mem = self.mem_sig_in;
-        highpass_50hz_at_12k8(&mut old_speech[NEW_SPEECH + L_FRAME..], &mut mem);
+        highpass_50hz_at_12k8(&mut old_speech[NEW_SPEECH + L_FRAME12K8..], &mut mem);
 
         // preemphasis, scaled for precision (Q_new) by the frame's maximum
         let mu = PREEMPH_FAC >> 1;
         let ns = NEW_SPEECH;
         let pre = |x: i16, prev: i16| l_msu(l_mult(x, 16384), prev, mu);
         let mut l_max = l_abs(pre(old_speech[ns], self.mem_preemph));
-        for i in 1..L_FRAME + L_FILT {
+        for i in 1..L_FRAME12K8 + L_FILT {
             let l = l_abs(pre(old_speech[ns + i], old_speech[ns + i - 1]));
             if l > l_max {
                 l_max = l;
@@ -325,8 +325,8 @@ impl CoderState {
         self.q_old = q_new;
         self.q_max[1] = self.q_max[0];
         self.q_max[0] = shift;
-        let tmp = old_speech[ns + L_FRAME - 1];
-        for i in (1..L_FRAME + L_FILT).rev() {
+        let tmp = old_speech[ns + L_FRAME12K8 - 1];
+        for i in (1..L_FRAME12K8 + L_FILT).rev() {
             old_speech[ns + i] = round(l_shl(
                 pre(old_speech[ns + i], old_speech[ns + i - 1]),
                 q_new,
@@ -334,7 +334,7 @@ impl CoderState {
         }
         old_speech[ns] = round(l_shl(pre(old_speech[ns], self.mem_preemph), q_new));
         self.mem_preemph = tmp;
-        scale_sig(&mut old_speech[..L_TOTAL - L_FRAME - L_FILT], exp);
+        scale_sig(&mut old_speech[..L_TOTAL - L_FRAME12K8 - L_FILT], exp);
         scale_sig(&mut old_exc[..OLD_EXC], exp);
         scale_sig(&mut self.mem_syn, exp);
         scale_sig(&mut self.mem_decim2, exp);
@@ -343,7 +343,7 @@ impl CoderState {
 
         crate::stages::mark(crate::stages::E_PRE);
         // VAD (on the new speech, slightly ahead), DTX
-        let mut buf: [i16; L_FRAME] = old_speech[ns..ns + L_FRAME].try_into().unwrap();
+        let mut buf: [i16; L_FRAME12K8] = old_speech[ns..ns + L_FRAME12K8].try_into().unwrap();
         scale_sig(&mut buf, sub(1, q_new));
         let vad_flag = self.vad.vad(&buf);
         self.vad_hist = if vad_flag == 0 {
@@ -390,29 +390,29 @@ impl CoderState {
             );
         }
         deemph2(
-            &mut old_wsp[WSP..WSP + L_FRAME],
+            &mut old_wsp[WSP..WSP + L_FRAME12K8],
             TILT_FAC,
             &mut self.mem_wsp,
         );
         let mut max = 0i16;
-        for &w in &old_wsp[WSP..WSP + L_FRAME] {
+        for &w in &old_wsp[WSP..WSP + L_FRAME12K8] {
             max = max.max(abs_s(w));
         }
         let tmp = max.max(self.old_wsp_max);
         self.old_wsp_max = max;
         let shift = sub(norm_s(tmp), 3).min(0);
-        lp_decim2(&mut old_wsp[WSP..], L_FRAME, &mut self.mem_decim2);
-        scale_sig(&mut old_wsp[WSP..WSP + L_FRAME / OPL_DECIM], shift);
+        lp_decim2(&mut old_wsp[WSP..], L_FRAME12K8, &mut self.mem_decim2);
+        scale_sig(&mut old_wsp[WSP..WSP + L_FRAME12K8 / OPL_DECIM], shift);
         exp = add(exp, sub(shift, self.old_wsp_shift));
         self.old_wsp_shift = shift;
         scale_sig(&mut old_wsp[..OLD_WSP], exp);
         scale_sig(&mut self.old_hp_wsp[..OLD_WSP], exp);
         scale_mem_hp_wsp(&mut self.hp_wsp_mem, exp);
-        let half = L_FRAME / 2 / OPL_DECIM;
+        let half = L_FRAME12K8 / 2 / OPL_DECIM;
         let t_op;
         let t_op2;
         if ser_size == NBBITS_7K {
-            t_op = self.open_loop(&old_wsp, WSP, L_FRAME / OPL_DECIM);
+            t_op = self.open_loop(&old_wsp, WSP, L_FRAME12K8 / OPL_DECIM);
             t_op2 = t_op;
         } else {
             t_op = self.open_loop(&old_wsp, WSP, half);
@@ -420,7 +420,7 @@ impl CoderState {
         }
 
         crate::stages::mark(crate::stages::E_OL);
-        let mut exc2 = [0i16; L_FRAME];
+        let mut exc2 = [0i16; L_FRAME12K8];
         if mode == MRDTX {
             // comfort noise: buffer the ISFs and energy, send the SID parameters
             residu(
@@ -428,9 +428,9 @@ impl CoderState {
                 &old_speech,
                 SPEECH,
                 &mut old_exc[EXC..],
-                L_FRAME,
+                L_FRAME12K8,
             );
-            for i in 0..L_FRAME {
+            for i in 0..L_FRAME12K8 {
                 exc2[i] = shr(old_exc[EXC + i], q_new);
             }
             let mut l = 0i32;
@@ -454,9 +454,10 @@ impl CoderState {
             }
             self.isfold = isf;
             self.reset(false);
-            self.old_speech.copy_from_slice(&old_speech[L_FRAME..]);
-            self.old_wsp
-                .copy_from_slice(&old_wsp[L_FRAME / OPL_DECIM..L_FRAME / OPL_DECIM + OLD_WSP]);
+            self.old_speech.copy_from_slice(&old_speech[L_FRAME12K8..]);
+            self.old_wsp.copy_from_slice(
+                &old_wsp[L_FRAME12K8 / OPL_DECIM..L_FRAME12K8 / OPL_DECIM + OLD_WSP],
+            );
             return (mode, prms.len());
         }
 
@@ -504,7 +505,7 @@ impl CoderState {
             );
         }
         if vad_flag == 0 {
-            for i in 0..L_FRAME {
+            for i in 0..L_FRAME12K8 {
                 exc2[i] = shr(old_exc[EXC + i], q_new);
             }
             let mut l = 0i32;
@@ -864,11 +865,11 @@ impl CoderState {
             }
             crate::stages::mark(crate::stages::E_SUB_POST);
         }
-        self.old_speech.copy_from_slice(&old_speech[L_FRAME..]);
+        self.old_speech.copy_from_slice(&old_speech[L_FRAME12K8..]);
         self.old_wsp
-            .copy_from_slice(&old_wsp[L_FRAME / OPL_DECIM..L_FRAME / OPL_DECIM + OLD_WSP]);
+            .copy_from_slice(&old_wsp[L_FRAME12K8 / OPL_DECIM..L_FRAME12K8 / OPL_DECIM + OLD_WSP]);
         self.old_exc
-            .copy_from_slice(&old_exc[L_FRAME..L_FRAME + OLD_EXC]);
+            .copy_from_slice(&old_exc[L_FRAME12K8..L_FRAME12K8 + OLD_EXC]);
         (mode, prms.len())
     }
 
