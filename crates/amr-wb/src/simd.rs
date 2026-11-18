@@ -11,7 +11,7 @@
 //! `--cfg portable` compiles the dispatch out (`just test` runs both paths).
 //!
 //! Where LLVM's lanes stay poor, a kernel gets an AVX2 intrinsics body here (`dots4`, `norm_lags`,
-//! `fir32`), dispatched per call the same way; its `*_portable` body is the contract and oracle.
+//! `fir32`, `phase_conv`), dispatched per call the same way; its `*_portable` body is the contract and oracle.
 #![allow(unsafe_code)] // the approved scope: #[target_feature] copies and AVX2 kernels, below
 
 use crate::cnst::{L_FRAME, L_SUBFR, M, RxFrameType};
@@ -177,7 +177,7 @@ fn dots4_avx2<const N: usize>(h: &[i16; L_SUBFR], p: &[i16], o: usize) -> [i32; 
 /// or more). On AVX2 as tap pairs: x interleaved once into X2[i] = (x[i], x[i + 1]), then per
 /// pair one `pmaddwd` of 8 outputs' X2 window with the broadcast (c[2m], c[2m + 1]) (the
 /// transposed portable form multiplies in i32 lanes, one tap per pass). Exact where the
-/// portable form is: its sums can't wrap there (callers bound them below 2^30).
+/// portable form is: |Σ| + 2^(SH-1) < 2^31 (wrapping adds then give the true sum).
 #[inline(always)]
 pub(crate) fn fir32<const NO: usize, const SH: i32>(
     x: &[i16],
@@ -244,6 +244,55 @@ fn fir32_avx2<const NO: usize, const SH: i32>(
             let p = _mm256_packs_epi32(r(acc[2 * j]), r(acc[2 * j + 1]));
             let p = _mm256_permute4x64_epi64::<0xd8>(p);
             _mm256_storeu_si256(out.as_mut_ptr().add(16 * j) as *mut __m256i, p);
+        }
+    }
+}
+
+/// `excitation::phase_conv_portable` (the contract and the oracle): `phase_dispersion`'s
+/// convolution. On AVX2 a row is 4 × (`pmulhrsw` of 16 taps with the broadcast sample, then
+/// `paddsw`): `pmulhrsw` is `mult_int16_r` but for (-32768)², which the taps exclude (a
+/// `const` assertion there); LLVM's lanes do each product in i32 (`pmaddwd`, shifts, packs).
+#[inline(always)]
+pub(crate) fn phase_conv(code: &mut [i16; L_SUBFR], imp: &[i16; L_SUBFR]) {
+    #[cfg(all(target_arch = "x86_64", not(portable)))]
+    if avx2() {
+        // SAFETY: `phase_conv_avx2` only requires AVX2, which `avx2()` just confirmed.
+        return unsafe { phase_conv_avx2(code, imp) };
+    }
+    crate::excitation::phase_conv_portable(code, imp)
+}
+
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+#[target_feature(enable = "avx2")]
+#[inline]
+fn phase_conv_avx2(code: &mut [i16; L_SUBFR], imp: &[i16; L_SUBFR]) {
+    use core::arch::x86_64::{
+        __m256i, _mm256_adds_epi16, _mm256_loadu_si256, _mm256_mulhrs_epi16, _mm256_set1_epi16,
+        _mm256_storeu_si256,
+    };
+    let mut code2 = [0i16; 2 * L_SUBFR];
+    // Loads of 16 i16 at imp[16k] and code[16k] (k < 4), at code2[i + 16k] (i < 64: within
+    // 128) and code2[16k], code2[64 + 16k]; stores at the same code2 and code places.
+    // SAFETY: every access is in bounds (above); AVX2 is enabled in this function.
+    unsafe {
+        let ld = |p: *const i16| _mm256_loadu_si256(p as *const __m256i);
+        let t = [0, 1, 2, 3].map(|k| ld(imp.as_ptr().add(16 * k)));
+        for (i, &ci) in code.iter().enumerate() {
+            if ci != 0 {
+                let c = _mm256_set1_epi16(ci);
+                for (k, &tk) in t.iter().enumerate() {
+                    let p = code2.as_mut_ptr().add(i + 16 * k);
+                    let v = _mm256_adds_epi16(ld(p), _mm256_mulhrs_epi16(c, tk));
+                    _mm256_storeu_si256(p as *mut __m256i, v);
+                }
+            }
+        }
+        for k in 0..4 {
+            let v = _mm256_adds_epi16(
+                ld(code2.as_ptr().add(16 * k)),
+                ld(code2.as_ptr().add(64 + 16 * k)),
+            );
+            _mm256_storeu_si256(code.as_mut_ptr().add(16 * k) as *mut __m256i, v);
         }
     }
 }

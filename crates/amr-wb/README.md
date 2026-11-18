@@ -32,7 +32,8 @@ Measured, with the recipe that reproduces each number, in
 - **Encoder bit-exact on the whole TS 26.174 encoder set**: 3,101/3,101 cases (every mode,
   DTX, mode switching, frame and bit synchronisation), with the two encoder changes since
   vo-amrwbenc (CR 26.173-0032 and -0036). vo-amrwbenc gets 3,006/3,101.
-- **Encoder ≈1.6× the speed of vo-amrwbenc** (1.51–1.61× per mode).
+- **Encoder ≈1.6× the speed of vo-amrwbenc** (1.51–1.63× per mode) with runtime AVX2 dispatch;
+  the portable code is on par with it (0.99×).
 - **Differentially tested against the TS 26.173 reference C**: the whole decoder on 1,600
   stress streams (corrupted and random bits, bad, lost and degraded frames, SID and NO_DATA
   sequences, mode switching), the whole encoder on 64 stress streams (speech up to clipping,
@@ -41,8 +42,8 @@ Measured, with the recipe that reproduces each number, in
 - **`.awb` files**: every vector, packed per RFC 4867 and read back, decodes bit-exactly;
   the reader agrees with the TS 26.173 reference's on 20,000 random frames, and the writer's
   output for the encoder's frames (DTX, every mode) is byte-equal to the reference's.
-- **≈2.2× the speed of opencore-amr's C decoder** (-O3; 1.76× at 6.60 kbit/s, 2.13–2.38× at
-  the other modes), with runtime AVX2 dispatch and a portable fallback.
+- **≈2.3× the speed of opencore-amr's C decoder** (-O3; 2.16–2.47× per mode) with runtime
+  AVX2 dispatch; the portable code 1.78×.
 - **Fuzzed against the TS 26.173 reference**: the decoder on arbitrary frames (1 h), the
   encoder on arbitrary PCM (30 min, comfort noise included).
 - **Ten defects of opencore's decoder fixed** (saturation, rounding, shift counts, the
@@ -56,4 +57,13 @@ comfort-noise hangover at once; the current specification first waits for 8 fram
 voice activity. Both agree on every conformance vector and differ only in the comfort noise
 after NO_DATA frames that arrive mid-speech.
 
-License: Apache-2.0 (see LICENSE and NOTICE).
+## Scope
+Single channel. RTP without interleaving, CRCs or robust sorting (the SDP defaults); `.awb`
+files without the multi-channel header. Frame types 10–13 (reserved) are reported as errors.
+Needs Rust 1.88 or later.
+
+## License
+Apache-2.0 ([LICENSE](https://github.com/jj2218/amr-rs/blob/main/crates/amr-wb/LICENSE)).
+The decoder is derived from opencore-amr 0.1.6, the encoder from vo-amrwbenc 0.1.3 (both
+Apache-2.0) and, through them, from the 3GPP TS 26.173 code; see
+[NOTICE](https://github.com/jj2218/amr-rs/blob/main/crates/amr-wb/NOTICE).

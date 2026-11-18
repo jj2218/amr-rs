@@ -466,8 +466,8 @@ fn fir31(x: &[i16; L_FIR + L_SUBFR16K + 1], fir: &[i16; L_FIR + 1], out: &mut [i
 
 /// The 32-tap FIRs' fast path (`crate::simd::fir32` dispatches; this is its portable body
 /// and oracle): out[n] = clamp16((Σ_{k<32} c[k]·x[n + k] + 2^(SH-1)) >> SH) with wrapping
-/// sums, exact while the sums stay below 2^30 in magnitude (`fir31`: round(2l), SH = 15;
-/// `pred_lt4`: round(4l), SH = 14). Transposed: the outputs in lanes, one pass per tap.
+/// sums, exact while |Σ| + 2^(SH-1) < 2^31 (`fir31`: round(2l), SH = 15, its callers bound
+/// |Σ| below 2^30; `pred_lt4`: round(4l), SH = 14, |Σ| <= 32768·Σ|c| < 2^31 - 2^13). Transposed: the outputs in lanes, one pass per tap.
 #[inline(always)]
 pub(crate) fn fir32_portable<const NO: usize, const SH: i32>(
     x: &[i16],
@@ -587,15 +587,38 @@ fn fir32_matches_portable() {
             amr_wb_round(l.wrapping_shl(1))
         });
         assert_eq!(b, want, "case {k}: the portable rounding");
-        // pred_lt4's instantiations: 16 and 32 outputs, round(4l) (sums below 2^30 here too)
+        // pred_lt4's instantiations: 16 and 32 outputs, round(4l), on its rows at full
+        // scale (x sign-aligned to the row every other case: |Σ| up to 32768·Σ|c|)
+        let c: &[i16; 32] = crate::tables::INTER4_2[(k % 4) * 32..][..32]
+            .try_into()
+            .unwrap();
+        let x: [i16; 80] = std::array::from_fn(|i| match (k / 4) % 2 {
+            0 if c[i % 32] < 0 => [i16::MIN, i16::MAX][(k / 8) % 2],
+            0 => [i16::MAX, i16::MIN][(k / 8) % 2],
+            _ => r.i16(),
+        });
+        let want = |n: usize| {
+            let d = (0..32).fold(0i64, |s, j| s + c[j] as i64 * x[n + j] as i64);
+            ((d + (1 << 13)) >> 14).clamp(-32768, 32767) as i16
+        };
         let (mut a16, mut b16) = ([0i16; 16], [0i16; 16]);
-        crate::simd::fir32::<16, 14>(&x[k % 64..], &c, &mut a16);
-        fir32_portable::<16, 14>(&x[k % 64..], &c, &mut b16);
+        crate::simd::fir32::<16, 14>(&x[k % 33..], c, &mut a16);
+        fir32_portable::<16, 14>(&x[k % 33..], c, &mut b16);
         assert_eq!(a16, b16, "case {k}: 16 outputs");
+        assert_eq!(
+            b16,
+            std::array::from_fn(|n| want(n + k % 33)),
+            "case {k}: 16, i64"
+        );
         let (mut a32, mut b32) = ([0i16; 32], [0i16; 32]);
-        crate::simd::fir32::<32, 14>(&x[k % 48..], &c, &mut a32);
-        fir32_portable::<32, 14>(&x[k % 48..], &c, &mut b32);
+        crate::simd::fir32::<32, 14>(&x[k % 17..], c, &mut a32);
+        fir32_portable::<32, 14>(&x[k % 17..], c, &mut b32);
         assert_eq!(a32, b32, "case {k}: 32 outputs");
+        assert_eq!(
+            b32,
+            std::array::from_fn(|n| want(n + k % 17)),
+            "case {k}: 32, i64"
+        );
         assert_eq!(a, b, "case {k}");
     }
 }

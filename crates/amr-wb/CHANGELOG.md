@@ -3,6 +3,14 @@
 One section per release, newest first. The release commit in the repository carries the
 section of each crate it releases.
 
+## 0.4.1 (2026-11-18)
+Changed
+- Faster decoder on x86-64 CPUs with AVX2: about 2.3× the speed of opencore-amr (was 2.2×).
+  The output is unchanged (bit-exact on the 3GPP vectors and against the 3GPP reference).
+- The package description names DTX and RFC 4867 packing; the keywords include `amr`.
+- README: a Scope section (single channel, the supported RTP options, Rust 1.88) and a License
+  section with links that work on crates.io.
+
 ## 0.4.0 (2026-11-18)
 One API shape for `amr-nb` and `amr-wb`. Breaking changes, with the migration:
 - `Encoder::new` takes a `Dtx` (`Off`, `On`) instead of a `bool`. Migration:

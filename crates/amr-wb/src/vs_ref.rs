@@ -5,7 +5,7 @@
 #![allow(unsafe_code)]
 
 use crate::basic_op::*;
-use crate::excitation::{agc2_amr_wb, pred_lt4};
+use crate::excitation::{agc2_amr_wb, phase_dispersion, pred_lt4};
 use crate::lpc::{isf_isp, isp_az};
 use crate::synthesis::*;
 use crate::testutil::{Rng, with_ref};
@@ -21,6 +21,13 @@ unsafe extern "C" {
     fn refwb_Pow2(exponant: i16, fraction: i16) -> i32;
     fn refwb_Isf_isp(isf: *mut i16, isp: *mut i16, m: i16);
     fn refwb_Pred_lt4(exc: *mut i16, t0: i16, frac: i16, l_subfr: i16);
+    fn refwb_Phase_dispersion(
+        gain_code: i16,
+        gain_pit: i16,
+        code: *mut i16,
+        mode: i16,
+        disp_mem: *mut i16,
+    );
     fn refwb_Syn_filt_32(
         a: *mut i16,
         m: i16,
@@ -172,7 +179,7 @@ fn pred_lt4_matches_reference() {
     let mut r = Rng::new(2);
     const PAST: usize = 231 + 17;
     for k in 0..N / 10 {
-        let loud = k % 2 == 0; // full-scale past excitation: row 1's guard fails
+        let loud = k % 2 == 0; // full-scale past excitation: row 1's chain saturates
         let mut buf = [0i16; PAST + 65];
         for v in &mut buf[..PAST] {
             *v = sample(&mut r, loud);
@@ -200,6 +207,52 @@ fn pred_lt4_matches_reference() {
         // SAFETY: the reference reads exc[-t0-16..] and writes exc[0..65], all inside `c`.
         with_ref(|| unsafe { refwb_Pred_lt4(c.as_mut_ptr().add(PAST), t0, frac, 65) });
         assert_eq!(buf, c, "Pred_lt4 t0 {t0} frac {frac} loud {loud}");
+    }
+}
+
+#[test]
+fn phase_dispersion_matches_reference() {
+    // call sequences per mode (the state machine), sparse to dense code vectors, with
+    // full-scale and -32768 samples (the products' extremes; the sums saturate)
+    let mut r = Rng::new(3);
+    for mode in 0..3i16 {
+        let (mut mem, mut c_mem) = ([0i16; 8], [0i16; 8]);
+        for k in 0..N / 10 {
+            let mut code = [0i16; 64];
+            let nz = [2, 4, 8, 24, 64][k % 5];
+            for _ in 0..nz {
+                let v = match r.u64() % 4 {
+                    0 => -32768,
+                    1 => 32767,
+                    _ => r.i16() >> (r.u64() % 8),
+                };
+                code[(r.u64() % 64) as usize] = v;
+            }
+            let gain_pit = (r.u64() % 20000) as i16;
+            // up to full scale every 4th call: the onset test's `sub`/`shl` saturate
+            let gain_code = if k % 4 == 3 {
+                r.i16().max(0)
+            } else {
+                (r.u64() % 4000) as i16
+            };
+            let mut c = code;
+            phase_dispersion(gain_code, gain_pit, &mut code, mode, &mut mem);
+            // SAFETY: the reference reads/writes code[0..64] and disp_mem[0..8].
+            with_ref(|| unsafe {
+                refwb_Phase_dispersion(
+                    gain_code,
+                    gain_pit,
+                    c.as_mut_ptr(),
+                    mode,
+                    c_mem.as_mut_ptr(),
+                )
+            });
+            assert_eq!(
+                (code, mem),
+                (c, c_mem),
+                "Phase_dispersion mode {mode} call {k}"
+            );
+        }
     }
 }
 

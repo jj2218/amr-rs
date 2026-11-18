@@ -2,7 +2,7 @@
 name = "amr-nb"
 version = "0.2.0"
 description = "Pure-Rust, bit-exact AMR-NB (3GPP TS 26.073) speech codec: encoder, decoder, DTX, RFC 4867 packing"
-keywords = ["amr", "speech", "codec", "audio", "3gpp"]
+keywords = ["amr", "amr-nb", "speech", "codec", "3gpp"]
 categories = ["multimedia::audio", "multimedia::encoding", "encoding"]
 readme = "README.md"
 # The tests and benches need the C oracles and vectors (dev-only path crates): not packaged.

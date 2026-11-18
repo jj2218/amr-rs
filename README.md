@@ -2,13 +2,20 @@
 
 Pure-Rust AMR speech codecs, bit-exact against the 3GPP specifications.
 
+```sh
+cargo add amr-nb   # AMR-NB, 8 kHz
+cargo add amr-wb   # AMR-WB, 16 kHz
+```
+
 | crate | |
 |---|---|
-| [`amr-nb`](crates/amr-nb) | AMR-NB (3GPP TS 26.073): encoder, decoder, DTX, RFC 4867 packing. Bit-exact on the whole TS 26.074 vector set; decoder ≈3.06×, encoder ≈2.25× the speed of opencore-amr's C. [README](crates/amr-nb/README.md) |
-| [`amr-wb`](crates/amr-wb) | AMR-WB (3GPP TS 26.173, ITU-T G.722.2): decoder, encoder, DTX, RFC 4867 packing. Bit-exact on the whole TS 26.174 vector set and against the TS 26.173 reference; decoder ≈2× the speed of opencore-amr's C, encoder (not yet tuned) ≈0.46× vo-amrwbenc's. [README](crates/amr-wb/README.md) |
+| [`amr-nb`](crates/amr-nb) | AMR-NB (3GPP TS 26.073): encoder, decoder, DTX, RFC 4867 packing (`.amr`, RTP). Bit-exact on the whole TS 26.074 vector set; faster than opencore-amr's C. [README: example, speed, scope](crates/amr-nb/README.md) |
+| [`amr-wb`](crates/amr-wb) | AMR-WB (3GPP TS 26.173, ITU-T G.722.2): decoder, encoder, DTX, RFC 4867 packing (`.awb`, RTP). Bit-exact on the whole TS 26.174 vector set and against the TS 26.173 reference; faster than opencore-amr's decoder, and with AVX2 than vo-amrwbenc. [README: example, speed, scope](crates/amr-wb/README.md) |
 | `opencore-sys`, `ref26073-sys`, `ref26173-sys` | test-only (not published): the C oracles, compiled from pinned downloads |
 
-Measured results, each with the command that reproduces it: [`docs/RESULTS.md`](docs/RESULTS.md).
+No dependencies. On x86-64 CPUs with AVX2 the hot kernels use it, detected
+at run time; elsewhere the portable code runs, with the same output. Measured results, each
+with the command that reproduces it: [`docs/RESULTS.md`](docs/RESULTS.md).
 
 ## Development
 Needs a stable Rust toolchain (pinned in `rust-toolchain.toml`, installed by rustup), [`just`](https://github.com/casey/just),

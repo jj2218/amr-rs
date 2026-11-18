@@ -416,13 +416,13 @@ impl State {
             self.tilt_code = (voice_fac >> 2) + 8192;
 
             // total excitation (kept for the next subframes' pitch)
-            sub_exc2.copy_from_slice(&old_exc[exc + i_subfr..exc + i_subfr + L_SUBFR]);
+            let cur: &mut [i16; L_SUBFR] = (&mut old_exc[exc + i_subfr..][..L_SUBFR])
+                .try_into()
+                .unwrap();
+            sub_exc2 = *cur;
+            *cur = mix_exc(&code, gain_code, cur, gain_pit);
             let mut max = 1i32;
-            for i in 0..L_SUBFR {
-                let mut l = shl_int32(mul_16by16_to_int32(code[i], gain_code), 5);
-                l = mac_16by16_to_int32(l, old_exc[exc + i_subfr + i], gain_pit);
-                let t = amr_wb_round(shl_int32(l, 1));
-                old_exc[exc + i_subfr + i] = t;
+            for &t in cur.iter() {
                 let t = t.wrapping_sub((t < 0) as i16);
                 max |= (t ^ (t >> 15)) as i32;
             }
@@ -466,21 +466,9 @@ impl State {
             // pitch-sharpened code (tilt from the voicing) plus adaptive part
             let tmp = (voice_fac >> 3) + 4096;
             let gain_code = amr_wb_round(shl_int32(l_gain_code, q_new));
-            for i in 0..L_SUBFR {
-                // one L_msu per neighbour, as TS 26.173 (opencore summed the neighbours into
-                // a 16-bit argument first, which wraps on loud codevectors)
-                let mut l = (code[i] as i32) << 16;
-                if i + 1 < L_SUBFR {
-                    l = msu_16by16_from_int32(l, code[i + 1], tmp);
-                }
-                if i > 0 {
-                    l = msu_16by16_from_int32(l, code[i - 1], tmp);
-                }
-                l = mul_16by16_to_int32(amr_wb_round(l), gain_code);
-                l = shl_int32(l, 5);
-                l = mac_16by16_to_int32(l, sub_exc2[i], gain_pit);
-                sub_exc2[i] = amr_wb_round(shl_int32(l, 1));
-            }
+            // one L_msu per neighbour, as TS 26.173 (opencore summed the neighbours into a
+            // 16-bit argument first, which wraps on loud codevectors)
+            sub_exc2 = mix_exc(&tilt_code(&code, tmp), gain_code, &sub_exc2, gain_pit);
             if nb_bits <= NBBITS_9K && pit_sharp > 16384 {
                 for i in 0..L_SUBFR {
                     excp[i] = add_int16(excp[i], sub_exc2[i]);

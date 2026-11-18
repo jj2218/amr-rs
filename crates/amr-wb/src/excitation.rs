@@ -16,10 +16,8 @@ const L_INTERPOL2: usize = 16;
 /// `round`); opencore sums plain products and truncates `>> 14` to 16 bits, wrapping on loud
 /// excitation (conformance vectors expose it).
 ///
-/// Fast path (exact): no partial sum of the chain reaches 2^31 while `2·max|x|·Σ|c| < 2^31`,
-/// and then the chain is the plain dot product. Three filter rows have `Σ|c| < 32768` (always
-/// fast); the fourth needs `max|x| < 30085`, checked against a running maximum of everything
-/// the loop can read (the past excitation and the outputs so far).
+/// Computed as clamp16((Σ c·x + 2^13) >> 14) (plain sums, `simd::fir32`'s form), exact for
+/// every input by `CHAIN_IS_CLAMPED_SUM` (below): the chain's L_shl + round equal it.
 #[inline(always)] // into simd::decode's AVX2 copy
 pub(crate) fn pred_lt4(buf: &mut [i16], pos: usize, t0: i16, frac: i16, l_subfr: usize) {
     let mut start = pos as isize - t0 as isize;
@@ -34,36 +32,19 @@ pub(crate) fn pred_lt4(buf: &mut [i16], pos: usize, t0: i16, frac: i16, l_subfr:
         .try_into()
         .unwrap();
     let start = start as usize;
-    let abs_sum: i32 = fir.iter().map(|&c| (c as i32).abs()).sum();
-    let limit = if abs_sum < 32768 {
-        i32::MAX
-    } else {
-        i32::MAX / (2 * abs_sum)
-    };
-    let mut max = buf[start..pos]
-        .iter()
-        .map(|&v| (v as i32).abs())
-        .max()
-        .unwrap_or(0);
-    // Blocks of outputs on `fir32`'s tap pairs while the bound holds: a block of B outputs at
-    // n0 reads buf[start + n0..start + n0 + B + 31], all before pos + n0 when pos - start >=
-    // B + 31 (pos - start = t0 + 15 or 16 >= 49): no output reads one of its own block. The
-    // sum is round(L_shl(2d, 1)) = clamp16((4d + 2^15) >> 16) = clamp16((d + 2^13) >> 14)
-    // with |d| < 2^30 (the bound).
+    // Blocks of outputs on `fir32`'s tap pairs: a block of B outputs at n0 reads
+    // buf[start + n0..start + n0 + B + 31], all before pos + n0 when pos - start >= B + 31
+    // (pos - start = t0 + 15 or 16 >= 49): no output reads one of its own block.
     let mut n0 = 0;
     let d = pos - start;
-    while max < limit {
+    loop {
         let (src, dst) = buf.split_at_mut(pos + n0);
         let x = &src[start + n0..];
         if d >= 63 && n0 + 32 <= l_subfr {
-            let y: &mut [i16; 32] = (&mut dst[..32]).try_into().unwrap();
-            crate::simd::fir32::<32, 14>(x, fir, y);
-            max = max.max(y.iter().map(|&v| (v as i32).abs()).max().unwrap_or(0));
+            crate::simd::fir32::<32, 14>(x, fir, (&mut dst[..32]).try_into().unwrap());
             n0 += 32;
         } else if d >= 47 && n0 + 16 <= l_subfr {
-            let y: &mut [i16; 16] = (&mut dst[..16]).try_into().unwrap();
-            crate::simd::fir32::<16, 14>(x, fir, y);
-            max = max.max(y.iter().map(|&v| (v as i32).abs()).max().unwrap_or(0));
+            crate::simd::fir32::<16, 14>(x, fir, (&mut dst[..16]).try_into().unwrap());
             n0 += 16;
         } else {
             break;
@@ -71,20 +52,34 @@ pub(crate) fn pred_lt4(buf: &mut [i16], pos: usize, t0: i16, frac: i16, l_subfr:
     }
     for n in n0..l_subfr {
         let x: &[i16; 2 * L_INTERPOL2] = buf[start + n..][..2 * L_INTERPOL2].try_into().unwrap();
-        let sum = if max < limit {
-            dot(x, fir).wrapping_shl(1)
-        } else {
-            let mut sum = 0i32;
-            for (&a, &c) in x.iter().zip(fir) {
-                sum = mac_16by16_to_int32(sum, a, c);
-            }
-            sum
-        };
-        let y = amr_wb_round(shl_int32(sum, 1));
-        buf[pos + n] = y;
-        max = max.max((y as i32).abs());
+        buf[pos + n] = (dot(x, fir).wrapping_add(1 << 13) >> 14).clamp(-32768, 32767) as i16;
     }
 }
+
+/// `Pred_lt4`'s chain (`L_mac` per tap from 0, `L_shl(·, 1)`, `round`) is the clamped plain
+/// sum for every input when each `INTER4_2` row has `Σ|c| < 32768 + 16384`. Plain: S = Σ 2·c·x,
+/// |S| <= 65536·Σ|c| < 2^32 - 2^14, so S/2 + 2^13 fits an i32. Without saturation the chain is S
+/// and round(L_shl(S, 1)) = clamp16((S/2 + 2^13) >> 14). A chain first saturates (to ±2^31)
+/// at tap k only if 65536·Σ_{j<=k}|c_j| >= 2^31, i.e. that prefix >= 32768; the taps after k
+/// then sum below 16384 in |c|, so they move the chain, and S beyond the prefix, by under
+/// 65536·16384 = 2^30: both stay at or beyond ±2^30 with the prefix's sign, where both forms
+/// give 32767 (S >= 2^30) or -32768 (S <= -2^30).
+const CHAIN_IS_CLAMPED_SUM: () = {
+    let mut r = 0;
+    while r < 4 {
+        let (mut s, mut k) = (0i32, 0);
+        while k < 2 * L_INTERPOL2 {
+            s += (INTER4_2[r * 2 * L_INTERPOL2 + k] as i32).abs();
+            k += 1;
+        }
+        assert!(
+            s < 32768 + 16384,
+            "an INTER4_2 row's chain may saturate unclamped"
+        );
+        r += 1;
+    }
+};
+const _: () = CHAIN_IS_CLAMPED_SUM;
 
 /// Plain `Σ x·y` (wrapping; callers bound it below 2^31). Fixed length: one vector loop.
 #[inline(always)]
@@ -376,7 +371,6 @@ pub(crate) fn phase_dispersion(
     mode: i16,
     disp_mem: &mut [i16; 8],
 ) {
-    let mut code2 = [0i16; 2 * L_SUBFR];
     let mut state: i16 = if gain_pit < PITCH_0_6 {
         0
     } else if gain_pit < PITCH_0_9 {
@@ -408,6 +402,25 @@ pub(crate) fn phase_dispersion(
         1 => &PH_IMP_MID,
         _ => return,
     };
+    crate::simd::phase_conv(code, imp);
+}
+
+// `mult_int16_r` saturates only for (-32768)²; with no -32768 tap it is `pmulhrsw` exactly
+// (`simd::phase_conv`'s AVX2 body).
+const _: () = {
+    let mut j = 0;
+    while j < L_SUBFR {
+        assert!(PH_IMP_LOW[j] != i16::MIN && PH_IMP_MID[j] != i16::MIN);
+        j += 1;
+    }
+};
+
+/// `phase_dispersion`'s circular convolution of `code` with `imp` (taps without -32768), in
+/// the C's order: one saturating row per non-zero sample into `code2`, then the wrapped half
+/// added on, saturating. The contract and the oracle of `simd::phase_conv`.
+#[inline(always)]
+pub(crate) fn phase_conv_portable(code: &mut [i16; L_SUBFR], imp: &[i16; L_SUBFR]) {
+    let mut code2 = [0i16; 2 * L_SUBFR];
     for i in 0..L_SUBFR {
         if code[i] != 0 {
             for j in 0..L_SUBFR {
@@ -525,6 +538,77 @@ pub(crate) fn scale_signal(x: &mut [i16], exp: i16) {
         for v in x.iter_mut() {
             *v = amr_wb_round(((*v as i32) << 16) >> e);
         }
+    }
+}
+
+/// `L_shl(l, K)`, saturating, as compares and selects (vectorises; `shl_int32` widens to i64).
+#[inline(always)]
+fn shl_sat<const K: u32>(l: i32) -> i32 {
+    if l > i32::MAX >> K {
+        i32::MAX
+    } else if l < i32::MIN >> K {
+        i32::MIN
+    } else {
+        l << K
+    }
+}
+
+/// The decoder's excitation mix per sample, as TS 26.173 (every op saturating):
+/// round(L_shl(L_mac(L_shl(L_mult(c, g), 5), e, gp), 1)). Branch-free over fixed arrays, so
+/// LLVM runs it in lanes (`simd::decode`'s AVX2 copy too).
+#[inline(always)]
+pub(crate) fn mix_exc(c: &[i16; L_SUBFR], g: i16, e: &[i16; L_SUBFR], gp: i16) -> [i16; L_SUBFR] {
+    let mut out = [0i16; L_SUBFR];
+    for ((o, &c), &e) in out.iter_mut().zip(c).zip(e) {
+        let l = shl_sat::<5>(mul_16by16_to_int32(c, g));
+        *o = amr_wb_round(shl_sat::<1>(l.saturating_add(mul_16by16_to_int32(e, gp))));
+    }
+    out
+}
+
+/// The enhancer's code tilt: round(L_msu(L_msu(c[i] << 16, c[i + 1], t), c[i - 1], t)), the
+/// missing neighbours at the ends as 0 (an `L_msu` of 0 is the identity).
+#[inline(always)]
+pub(crate) fn tilt_code(c: &[i16; L_SUBFR], t: i16) -> [i16; L_SUBFR] {
+    let mut p = [0i16; L_SUBFR + 2];
+    p[1..=L_SUBFR].copy_from_slice(c);
+    let mut out = [0i16; L_SUBFR];
+    for (o, w) in out.iter_mut().zip(p.windows(3)) {
+        let l = msu_16by16_from_int32((w[1] as i32) << 16, w[2], t);
+        *o = amr_wb_round(msu_16by16_from_int32(l, w[0], t));
+    }
+    out
+}
+
+#[cfg(test)]
+#[test]
+fn mix_exc_and_tilt_code_are_the_chains() {
+    let mut r = crate::testutil::Rng::new(11);
+    let v = |r: &mut crate::testutil::Rng| match r.u64() % 4 {
+        0 => [i16::MIN, i16::MAX, -1, 0][(r.u64() % 4) as usize],
+        _ => r.i16() >> (r.u64() % 12),
+    };
+    for _ in 0..20_000 {
+        let c: [i16; L_SUBFR] = std::array::from_fn(|_| v(&mut r));
+        let e: [i16; L_SUBFR] = std::array::from_fn(|_| v(&mut r));
+        let (g, gp, t) = (v(&mut r), v(&mut r), v(&mut r));
+        let want: [i16; L_SUBFR] = std::array::from_fn(|i| {
+            let mut l = shl_int32(mul_16by16_to_int32(c[i], g), 5);
+            l = mac_16by16_to_int32(l, e[i], gp);
+            amr_wb_round(shl_int32(l, 1))
+        });
+        assert_eq!(mix_exc(&c, g, &e, gp), want, "mix g {g} gp {gp}");
+        let want: [i16; L_SUBFR] = std::array::from_fn(|i| {
+            let mut l = (c[i] as i32) << 16;
+            if i + 1 < L_SUBFR {
+                l = msu_16by16_from_int32(l, c[i + 1], t);
+            }
+            if i > 0 {
+                l = msu_16by16_from_int32(l, c[i - 1], t);
+            }
+            amr_wb_round(l)
+        });
+        assert_eq!(tilt_code(&c, t), want, "tilt t {t}");
     }
 }
 
