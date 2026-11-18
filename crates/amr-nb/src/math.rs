@@ -1,6 +1,5 @@
 //! Fixed-point math helpers: `Inv_sqrt`, `Log2`, `Log2_norm`, `Pow2`, `sqrt_l_exp`.
 //! Bit-exact ports of opencore-amr 0.1.6 (Apache-2.0) `common/src/{inv_sqrt,log2,log2_norm,pow2,sqrt_l}.cpp`.
-#![allow(dead_code)] // used progressively as decoder modules land
 
 use crate::basic_op::{Flag, l_msu, l_mult, l_shl, l_shr_r, norm_l};
 use crate::tables::{INV_SQRT_TBL, LOG2_TBL, POW2_TBL, SQRT_L_TBL};
@@ -82,7 +81,7 @@ pub(crate) fn sqrt_l_exp(l_x: i32, ov: &mut Flag) -> (i32, i16) {
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::testutil::with_ref;
     use crate::testutil::{N, Rng};
@@ -119,7 +118,7 @@ mod vs_c {
     }
 
     #[test]
-    fn math_vs_c() {
+    fn math_vs_ref() {
         let mut g = Rng::new(42);
         for _ in 0..N {
             // Positive inputs (the functions' domain) plus the documented <= 0 branches.

@@ -244,7 +244,7 @@ fn add_scaled(dst: &mut [i16; L_SUBFR], imp: &[i16; L_SUBFR], c: i16) -> bool {
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::testutil::{N, Rng};
     use opencore_sys as _;
@@ -344,7 +344,7 @@ mod vs_c {
     }
 
     #[test]
-    fn ph_disp_vs_c() {
+    fn ph_disp_vs_ref() {
         let mut g = Rng::new(30);
         let mut tbls = CTbls([core::ptr::null(); 34]);
         unsafe { get_const_tbls((&raw mut tbls).cast()) };
@@ -441,7 +441,7 @@ mod vs_c {
     /// `L_mult` and in `L_mac`, `L_mac`'s unsaturated equal-operands overflow (accumulator ==
     /// product, the sum wraps), the `L_add`/`L_mac` saturation, `L_shl`'s, round's overflow.
     #[test]
-    fn total_exc_vs_c() {
+    fn total_exc_vs_ref() {
         let mut g = Rng::new(77);
         let pick = |g: &mut Rng| -> i16 {
             match g.u64() % 6 {

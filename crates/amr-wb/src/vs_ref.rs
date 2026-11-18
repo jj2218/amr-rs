@@ -179,6 +179,22 @@ fn pred_lt4_matches_reference() {
         }
         let t0 = 34 + (r.u64() % 198) as i16;
         let frac = (r.u64() % 4) as i16;
+        if k % 4 == 1 {
+            // a full-scale window with the row's signs at a random output: the chain saturates
+            let (mut f, mut st) = (-frac, PAST as isize - t0 as isize);
+            if f < 0 {
+                f += 4;
+                st -= 1;
+            }
+            let start = (st - 15) as usize;
+            let row = &crate::tables::INTER4_2[(3 - f as usize) * 32..][..32];
+            let n = (r.u64() % 16) as usize;
+            for (j, &c) in row.iter().enumerate() {
+                if start + n + j < PAST {
+                    buf[start + n + j] = if c < 0 { -32768 } else { 32767 };
+                }
+            }
+        }
         let mut c = buf;
         pred_lt4(&mut buf, PAST, t0, frac, 65);
         // SAFETY: the reference reads exc[-t0-16..] and writes exc[0..65], all inside `c`.

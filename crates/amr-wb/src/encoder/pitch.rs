@@ -97,15 +97,21 @@ fn norm_corr(
     let exp = add(sub(30, norm_l(l)), 2);
     let scale = negate(shr(exp, 1));
     let exx: i64 = xn.iter().map(|&x| x as i64 * x as i64).sum();
-    for t in t_min..=t_max {
-        let (lc, le) = dots_64(xn, &excf, exx);
-        let l = lc.unwrap_or_else(|| {
-            let mut l = 1i32;
-            for i in 0..L_SUBFR {
-                l = l_mac(l, xn[i], excf[i]);
-            }
-            l
-        });
+    // the fast lags first (both dots exact in i32, see `Lags`), the C's form from the first
+    // lag that leaves them; samples[n - 2 - i] = exc[k - 1 - i] updates lag i to lag i + 1
+    let n = (t_max - t_min + 1) as usize;
+    let mut sums = [[0i32; 2]; 40];
+    let lags = Lags {
+        xn,
+        h: h[..L_SUBFR].try_into().unwrap(),
+        see_max: if exx == 0 {
+            i64::MAX
+        } else {
+            LAGS_B * LAGS_B / exx
+        },
+    };
+    let done = crate::simd::norm_lags(&lags, &exc[k + 1 - n..k], &mut excf, &mut sums[..n]);
+    let norm = |t: i16, l: i32, le: i32, corr_norm: &mut [i16]| {
         let exp = norm_l(l);
         let corr = extract_h(l_shl(l, exp));
         let exp_corr = sub(30, exp);
@@ -116,16 +122,90 @@ fn norm_corr(
         let norm = extract_h(l);
         let l = l_mult(corr, norm);
         corr_norm[(t - t_min) as usize] = round(l_shl(l, add(add(exp_corr, exp_norm), scale)));
+    };
+    for (i, &[sxe, see]) in sums[..done].iter().enumerate() {
+        let le = (1 + 2 * see as i64).min(i32::MAX as i64) as i32;
+        norm(t_min + i as i16, 1 + 2 * sxe, le, corr_norm);
+    }
+    k -= done;
+    for t in t_min + done as i16..=t_max {
+        let (lc, le) = dots_64(xn, &excf, exx);
+        let l = lc.unwrap_or_else(|| {
+            let mut l = 1i32;
+            for i in 0..L_SUBFR {
+                l = l_mac(l, xn[i], excf[i]);
+            }
+            l
+        });
+        norm(t, l, le, corr_norm);
         if t != t_max {
             k -= 1;
-            // each output reads only the previous lag's excf (one vector pass)
-            let (e, old) = (exc[k], excf);
-            for i in 1..L_SUBFR {
-                excf[i] = add(mult(e, h[i]), old[i - 1]);
-            }
-            excf[0] = mult(e, h[0]);
+            next_excf(&mut excf, lags.h, exc[k]);
         }
     }
+}
+
+/// `Norm_Corr`'s update to the next lag: excf'[i] = add(mult(e, h[i]), excf[i - 1]),
+/// excf'[0] = mult(e, h[0]) (each output reads only the previous lag's excf).
+#[inline(always)]
+fn next_excf(excf: &mut [i16; L_SUBFR], h: &[i16; L_SUBFR], e: i16) {
+    let old = *excf;
+    for i in 1..L_SUBFR {
+        excf[i] = add(mult(e, h[i]), old[i - 1]);
+    }
+    excf[0] = mult(e, h[0]);
+}
+
+/// Largest |excf| with 64·|excf|^2 < 2^31: Σ excf² is exact in i32 up to it (`pmaddwd`'s pair
+/// sums too).
+pub(crate) const LAGS_V_MAX: i16 = 5792;
+const _: () = {
+    let (v, l) = (LAGS_V_MAX as i64, L_SUBFR as i64);
+    assert!(l * v * v < 1 << 31 && l * (v + 1) * (v + 1) >= 1 << 31);
+};
+/// `dots_64`'s Cauchy–Schwarz bound: 1 + 2Σx·e can't saturate while Σx²·Σe² <= B².
+const LAGS_B: i64 = (1 << 30) - 1;
+
+/// `norm_lags`' per-call inputs: the target, the impulse response, and the largest Σ e²
+/// with Σx²·Σe² <= B² (`dots_64`'s bound, so the correlation's chain is the plain sum).
+pub(crate) struct Lags<'a> {
+    pub(crate) xn: &'a [i16; L_SUBFR],
+    pub(crate) h: &'a [i16; L_SUBFR],
+    pub(crate) see_max: i64,
+}
+
+/// `Norm_Corr`'s fast lags (`crate::simd::norm_lags` dispatches; this is its portable body
+/// and oracle): for lag i = 0, 1, ..., `out[i]` = (Σ x·e_i, Σ e_i²) as wrapping i32 sums,
+/// `e_0` = `excf`, e_{i+1} = `next_excf`(e_i, samples[len - 1 - i]). Stops at the first lag
+/// with max|e| > `LAGS_V_MAX` or Σe² > `see_max` and returns its index (`excf` then holds
+/// that lag's e); else `out.len()`.
+#[inline(always)]
+pub(crate) fn norm_lags_portable(
+    p: &Lags,
+    samples: &[i16],
+    excf: &mut [i16; L_SUBFR],
+    out: &mut [[i32; 2]],
+) -> usize {
+    let n = out.len();
+    debug_assert!(samples.len() + 1 >= n, "norm_lags: one sample per update");
+    for (i, o) in out.iter_mut().enumerate() {
+        if excf.iter().any(|&v| v.unsigned_abs() > LAGS_V_MAX as u16) {
+            return i;
+        }
+        let (mut sxe, mut see) = (0i32, 0i32);
+        for j in 0..L_SUBFR {
+            sxe = sxe.wrapping_add(p.xn[j] as i32 * excf[j] as i32);
+            see = see.wrapping_add(excf[j] as i32 * excf[j] as i32);
+        }
+        if see as i64 > p.see_max {
+            return i;
+        }
+        *o = [sxe, see];
+        if i + 1 < n {
+            next_excf(excf, p.h, samples[samples.len() - 1 - i]);
+        }
+    }
+    n
 }
 
 /// `Norm_Corr`'s two `L_mac` chains from 1 over a subframe, `1 + 2Σ x·e` and `1 + 2Σ e²`,
@@ -142,7 +222,7 @@ fn dots_64(x: &[i16; L_SUBFR], e: &[i16; L_SUBFR], exx: i64) -> (Option<i32>, i3
         see += (e[j] as i32 * e[j] as i32) as i64;
     }
     let le = (1 + 2 * see).min(i32::MAX as i64) as i32;
-    const B: i128 = (1 << 30) - 1;
+    const B: i128 = LAGS_B as i128;
     let lc = ((exx as i128) * (see as i128) <= B * B).then(|| 1 + 2 * sxe);
     (lc, le)
 }
@@ -229,6 +309,64 @@ pub(crate) fn gp_clip_test_gain_pit(ser_size: i16, gain_pit: i16, mem: &mut [i16
         l_mac(l_mult(29491, mem[1]), 3277, gain_pit)
     };
     mem[1] = extract_h(l).max(GAIN_PIT_MIN);
+}
+
+/// `simd::norm_lags` (the AVX2 body where available) against its portable body: decaying
+/// impulse responses and moderate signals (many fast lags), with |e| placed at the range
+/// bound (`LAGS_V_MAX`, + 1), Σe² at `see_max`, and t = h[j] = -32768 (`mult`'s overflow).
+#[cfg(test)]
+#[test]
+fn norm_lags_matches_portable() {
+    let mut r = crate::testutil::Rng::new(41);
+    let mut depth = [0usize; 2];
+    for n in 0..40_000u64 {
+        let sh = 3 + (r.u64() % 5) as u32;
+        let xn: [i16; L_SUBFR] = std::array::from_fn(|_| r.i16());
+        let mut h: [i16; L_SUBFR] = std::array::from_fn(|j| r.i16() >> (2 + j.min(12) as u32));
+        let mut excf: [i16; L_SUBFR] = std::array::from_fn(|_| r.i16() >> sh);
+        let len = 1 + (n % 40) as usize;
+        // as `norm_corr` passes them: one sample per update (len - 1)
+        let mut samples: Vec<i16> = (0..len - 1).map(|_| r.i16() >> (sh + 2)).collect();
+        let j = (r.u64() % 64) as usize;
+        match n % 5 {
+            0 => {
+                excf[j] =
+                    [LAGS_V_MAX, -LAGS_V_MAX, LAGS_V_MAX + 1, -LAGS_V_MAX - 1][n as usize / 5 % 4]
+            }
+            1 => {
+                h[j] = i16::MIN;
+                if len > 1 {
+                    let at = (r.u64() % (len as u64 - 1)) as usize;
+                    samples[at] = i16::MIN;
+                }
+                for v in &mut h[j + 1..] {
+                    *v = 0; // keep e in range after the overflow sample
+                }
+            }
+            _ => {}
+        }
+        let exx: i64 = xn.iter().map(|&x| x as i64 * x as i64).sum();
+        let see0: i64 = excf.iter().map(|&v| v as i64 * v as i64).sum();
+        let see_max = match n % 4 {
+            0 => i64::MAX,
+            1 => see0 + (r.u64() % 3) as i64 - 1, // the bound on the first lag
+            _ => LAGS_B * LAGS_B / exx.max(1),
+        };
+        let lags = Lags {
+            xn: &xn,
+            h: &h,
+            see_max,
+        };
+        let s = &samples[..];
+        let (mut ea, mut eb) = (excf, excf);
+        let (mut oa, mut ob) = ([[0i32; 2]; 40], [[0i32; 2]; 40]);
+        let da = crate::simd::norm_lags(&lags, s, &mut ea, &mut oa[..len]);
+        let db = norm_lags_portable(&lags, s, &mut eb, &mut ob[..len]);
+        assert_eq!((da, ea, oa), (db, eb, ob), "case {n}");
+        depth[(da == len) as usize] += 1;
+    }
+    // both outcomes are common: early exits and full runs
+    assert!(depth[0] > 4000 && depth[1] > 4000, "{depth:?}");
 }
 
 #[cfg(test)]

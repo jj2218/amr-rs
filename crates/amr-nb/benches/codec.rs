@@ -50,7 +50,7 @@ fn wanted(name: &str) -> bool {
     std::env::var("BENCH_MODE").map_or(true, |m| m == name)
 }
 
-/// Exits on an unknown `BENCH_MODE` (it would run nothing).
+/// Exits on an unknown `BENCH_MODE` (it would run nothing) or `BENCH` (it would run both sides).
 fn check_mode() {
     if let Ok(m) = std::env::var("BENCH_MODE")
         && !MODES.contains(&m.as_str())
@@ -59,6 +59,12 @@ fn check_mode() {
             "bench: unknown BENCH_MODE '{m}' (modes: {})",
             MODES.join(" ")
         );
+        std::process::exit(2);
+    }
+    if let Ok(b) = std::env::var("BENCH")
+        && !["", "dec", "enc"].contains(&b.as_str())
+    {
+        eprintln!("bench: unknown BENCH '{b}' (dec, enc; unset: both)");
         std::process::exit(2);
     }
 }
@@ -104,20 +110,40 @@ fn row(name: &str, rust: f64, c: f64, frames: usize) {
     println!("{name:<6} {ur:>10.3} {uc:>10.3} {:>7.2}x", uc / ur);
 }
 
+/// The "all" row (every mode timed: not with `BENCH_MODE`, nor in a stages build).
+fn total(tr: f64, tc: f64, tn: usize) {
+    if tn > 0 && std::env::var("BENCH_MODE").is_err() {
+        row("all", tr, tc, tn);
+        println!("({tn} frames/rep, best of {})", reps());
+    }
+}
+
+/// `--cfg codec_stages` (`BENCH=stages`): µs per frame per stage (mean of all reps, timer
+/// overhead included), then the frame's total.
+#[cfg(codec_stages)]
+fn stages_row(name: &str, n: usize, frames: usize) {
+    let ns = amr_nb::stages::take();
+    let per = (frames * reps()) as f64 * 1e3;
+    let cols: String = ns[..n]
+        .iter()
+        .map(|&v| format!(" {:>13.2}", v as f64 / per))
+        .collect();
+    let total = ns.iter().sum::<u64>() as f64 / per;
+    println!("stages {name:<5}{cols}  = {total:.2}");
+}
+
+/// The stage table's header.
+#[cfg(codec_stages)]
+fn stages_head(side: &str, names: &[&str]) {
+    let cols: String = names.iter().map(|n| format!(" {n:>13}")).collect();
+    println!("stages {side}  {cols}");
+}
+
 fn decoder() {
     let cases = common::cases();
     #[cfg(codec_stages)]
-    println!(
-        "stages dec  {}",
-        amr_nb::stages::NAMES_DEC
-            .iter()
-            .map(|n| format!(" {n:>13}"))
-            .collect::<String>()
-    );
-    println!(
-        "decoder {:<0} {:>9} {:>10} {:>8}",
-        "", "rust µs", "c µs", "speedup"
-    );
+    stages_head("dec", &amr_nb::stages::NAMES_DEC);
+    println!("decoder {:>9} {:>10} {:>8}", "rust µs", "c µs", "speedup");
     let (mut tr, mut tc, mut tn) = (0.0, 0.0, 0usize);
     for (m, name) in MODES.iter().enumerate().filter(|(_, n)| wanted(n)) {
         let set: Vec<_> = cases
@@ -140,13 +166,7 @@ fn decoder() {
         });
         #[cfg(codec_stages)]
         {
-            let ns = amr_nb::stages::take();
-            let per = (frames * reps()) as f64 * 1e3;
-            let cols: Vec<String> = ns
-                .iter()
-                .map(|&v| format!("{:>8.2}", v as f64 / per))
-                .collect();
-            println!("stages {name:<4}{}", cols.join(""));
+            stages_row(name, amr_nb::stages::NAMES_DEC.len(), frames);
             continue;
         }
         // Pre-built ETS frames so the C timing excludes Rust-side formatting.
@@ -183,32 +203,13 @@ fn decoder() {
     total(tr, tc, tn);
 }
 
-fn total(tr: f64, tc: f64, tn: usize) {
-    let (ur, uc) = (tr / tn as f64 * 1e6, tc / tn as f64 * 1e6);
-    println!(
-        "{:<6} {ur:>10.3} {uc:>10.3} {:>7.2}x  ({tn} frames/rep, best of {})",
-        "all",
-        uc / ur,
-        reps()
-    );
-}
-
 /// Encoder (DTX off) on the NODTX speech inputs, one case per input file and mode.
 fn encoder() {
     // NODTX speech `T<nn>_<mode>` only (not T21's mode switching): reads only those files.
     let cases = common::encoder_cases_where(|n| n.starts_with("nodtx/T") && n.contains('_'));
     #[cfg(codec_stages)]
-    println!(
-        "stages mode {}",
-        amr_nb::stages::NAMES
-            .iter()
-            .map(|n| format!(" {n:>13}"))
-            .collect::<String>()
-    );
-    println!(
-        "encoder {:<0} {:>9} {:>10} {:>8}",
-        "", "rust µs", "c µs", "speedup"
-    );
+    stages_head("enc", &amr_nb::stages::NAMES_ENC);
+    println!("encoder {:>9} {:>10} {:>8}", "rust µs", "c µs", "speedup");
     let (mut tr, mut tc, mut tn) = (0.0, 0.0, 0usize);
     for (m, name) in MODES.iter().enumerate().filter(|(_, n)| wanted(n)) {
         let inputs: Vec<&[[i16; common::L_FRAME]]> = cases
@@ -227,17 +228,9 @@ fn encoder() {
                 }
             }
         });
-        // `--cfg codec_stages` (`BENCH=stages`): µs per frame per encoder stage (the mean
-        // over every rep, timer overhead included), then the next mode.
         #[cfg(codec_stages)]
         {
-            let ns = amr_nb::stages::take();
-            let per = (frames * reps()) as f64 * 1e3;
-            let cols: Vec<String> = ns
-                .iter()
-                .map(|&v| format!("{:>8.2}", v as f64 / per))
-                .collect();
-            println!("stages {name:<4}{}", cols.join(""));
+            stages_row(name, amr_nb::stages::NAMES_ENC.len(), frames);
             continue;
         }
         let c = best(|| {

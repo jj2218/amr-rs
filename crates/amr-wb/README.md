@@ -32,7 +32,7 @@ Measured, with the recipe that reproduces each number, in
 - **Encoder bit-exact on the whole TS 26.174 encoder set**: 3,101/3,101 cases (every mode,
   DTX, mode switching, frame and bit synchronisation), with the two encoder changes since
   vo-amrwbenc (CR 26.173-0032 and -0036). vo-amrwbenc gets 3,006/3,101.
-- **Encoder 1.43× the speed of vo-amrwbenc** (1.34–1.54× per mode).
+- **Encoder ≈1.6× the speed of vo-amrwbenc** (1.51–1.61× per mode).
 - **Differentially tested against the TS 26.173 reference C**: the whole decoder on 1,600
   stress streams (corrupted and random bits, bad, lost and degraded frames, SID and NO_DATA
   sequences, mode switching), the whole encoder on 64 stress streams (speech up to clipping,
@@ -41,8 +41,8 @@ Measured, with the recipe that reproduces each number, in
 - **`.awb` files**: every vector, packed per RFC 4867 and read back, decodes bit-exactly;
   the reader agrees with the TS 26.173 reference's on 20,000 random frames, and the writer's
   output for the encoder's frames (DTX, every mode) is byte-equal to the reference's.
-- **≈2× the speed of opencore-amr's C decoder** (-O3; 1.85× at 6.60 kbit/s, 1.98–2.09× at the
-  other modes), with runtime AVX2 dispatch and a portable fallback.
+- **≈2.2× the speed of opencore-amr's C decoder** (-O3; 1.76× at 6.60 kbit/s, 2.13–2.38× at
+  the other modes), with runtime AVX2 dispatch and a portable fallback.
 - **Fuzzed against the TS 26.173 reference**: the decoder on arbitrary frames (1 h), the
   encoder on arbitrary PCM (30 min, comfort noise included).
 - **Ten defects of opencore's decoder fixed** (saturation, rounding, shift counts, the

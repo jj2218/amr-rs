@@ -117,7 +117,7 @@ pub(crate) fn dec_lag6(
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::testutil::{N, Rng};
     use opencore_sys as _;
@@ -186,7 +186,7 @@ mod vs_c {
     }
 
     #[test]
-    fn dec_lag3_vs_c() {
+    fn dec_lag3_vs_ref() {
         let mut g = Rng::new(10);
         for _ in 0..N {
             // i_subfr == 0: 8-bit absolute index; others: 5-bit (flag4 = 0) or 4-bit
@@ -223,7 +223,7 @@ mod vs_c {
     }
 
     #[test]
-    fn dec_lag6_vs_c() {
+    fn dec_lag6_vs_ref() {
         let mut g = Rng::new(11);
         for _ in 0..N {
             // MR122: 9-bit absolute index for i_subfr == 0, 6-bit relative otherwise.

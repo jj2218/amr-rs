@@ -1,7 +1,6 @@
 //! Decoder DTX / comfort noise: `dtx_dec.cpp` (state machine + activity update; `dtx_dec`
 //! itself lands with the decoder core), `b_cn_cod.cpp`, `a_refl.cpp`.
 //! Bit-exact port of opencore-amr 0.1.6 (Apache-2.0).
-#![allow(dead_code)] // wired up by the decoder core
 
 use crate::basic_op::{
     Flag, MAX_32, abs_s, add, div_s, l_add, l_add_energy, l_msu, l_mult, l_shl, l_shr_r, l_sub,
@@ -610,7 +609,7 @@ fn a_refl_impl(a: &[i16; M], refl: &mut [i16; M], ov: &mut Flag) -> bool {
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::testutil::{N, Rng};
     use opencore_sys as _;
@@ -731,7 +730,7 @@ mod vs_c {
     ];
 
     #[test]
-    fn dtx_state_machine_vs_c() {
+    fn dtx_state_machine_vs_ref() {
         let mut g = Rng::new(7);
         for run in 0..200 {
             let mut r = DtxDecState::new();
@@ -777,7 +776,7 @@ mod vs_c {
     }
 
     #[test]
-    fn comfort_noise_builders_vs_c() {
+    fn comfort_noise_builders_vs_ref() {
         let mut g = Rng::new(11);
         let sizes: &[i16] = &crate::tables::BITNO_MR122;
         for _ in 0..N / 10 {
@@ -827,7 +826,7 @@ mod vs_c {
     /// for such inputs. Compare on the inputs the decoder produces (LPC from valid LSPs via
     /// `Lsp_Az`, as in `dtx_dec`) and on the deterministic `|a[i]| >= 4096` rejection path.
     #[test]
-    fn a_refl_vs_c() {
+    fn a_refl_vs_ref() {
         let mut g = Rng::new(13);
         let mut undefined = 0;
         for case in 0..N {

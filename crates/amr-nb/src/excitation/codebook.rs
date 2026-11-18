@@ -210,7 +210,7 @@ pub(crate) fn dec_10i40_35bits(index: &[i16], cod: &mut [i16]) {
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::testutil::{N, Rng};
     use opencore_sys as _;
@@ -273,7 +273,7 @@ mod vs_c {
     }
 
     #[test]
-    fn small_codebooks_vs_c() {
+    fn small_codebooks_vs_ref() {
         let mut g = Rng::new(1);
         for _ in 0..N {
             // decode_2i40_9bits: subNr 0..=3, index 7 bits, sign 2 bits (MR475/MR515).
@@ -318,7 +318,7 @@ mod vs_c {
     }
 
     #[test]
-    fn dec_8i40_31bits_vs_c() {
+    fn dec_8i40_31bits_vs_ref() {
         let mut g = Rng::new(2);
         for n in 0..N {
             // MR102: 4 sign bits, two 10-bit and one 7-bit position words. Every 8th case
@@ -347,7 +347,7 @@ mod vs_c {
     }
 
     #[test]
-    fn dec_10i40_35bits_vs_c() {
+    fn dec_10i40_35bits_vs_ref() {
         let mut g = Rng::new(3);
         for _ in 0..N {
             // MR122: five 4-bit (sign + position) and five 3-bit position words.

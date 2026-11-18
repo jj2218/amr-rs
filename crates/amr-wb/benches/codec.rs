@@ -1,9 +1,8 @@
-//! Codec speed on the 3GPP TS 26.174 single-mode vectors (`T_<mode>/T00..T20`), per mode.
-//! Decoder: Rust vs opencore (C, -O3), both the same frame loop (homing test, decode, 14-bit
-//! output) on pre-parsed serial bits. `BENCH=enc`: encoder, Rust vs vo-amrwbenc (C, -O3) on
-//! the vectors' input PCM. Run via `CRATE=amr-wb just bench` (pins one core). Prints µs/frame
-//! (best of BENCH_REPS, default 15) and the speedup; `BENCH_MODE=<mode>` (e.g. 1265) runs one
-//! mode.
+//! Codec speed: Rust vs the C (-O3: opencore's decoder, vo-amrwbenc) on the 3GPP TS 26.174
+//! single-mode vectors (`T_<mode>/T00..T20`), per mode: the decoder on their serial bits, the
+//! encoder on their input PCM. `BENCH=dec` or `BENCH=enc` runs one side only. Run via
+//! `CRATE=amr-wb just bench` (pins one core). Prints µs/frame (best of BENCH_REPS, default 15)
+//! and the speedup. `just profile` runs it once under callgrind.
 #![allow(unsafe_code)] // FFI to the C baseline
 
 #[path = "../tests/common/mod.rs"]
@@ -24,9 +23,28 @@ fn reps() -> usize {
         .unwrap_or(15)
 }
 
-/// `BENCH_MODE=<mode>` runs only that mode.
+/// `BENCH_MODE=<mode>` (e.g. 1265) runs only that mode (`just bench`, `just profile`).
 fn wanted(name: &str) -> bool {
     std::env::var("BENCH_MODE").map_or(true, |m| m == name)
+}
+
+/// Exits on an unknown `BENCH_MODE` (it would run nothing) or `BENCH` (it would run both sides).
+fn check_mode() {
+    if let Ok(m) = std::env::var("BENCH_MODE")
+        && !MODES.contains(&m.as_str())
+    {
+        eprintln!(
+            "bench: unknown BENCH_MODE '{m}' (modes: {})",
+            MODES.join(" ")
+        );
+        std::process::exit(2);
+    }
+    if let Ok(b) = std::env::var("BENCH")
+        && !["", "dec", "enc"].contains(&b.as_str())
+    {
+        eprintln!("bench: unknown BENCH '{b}' (dec, enc; unset: both)");
+        std::process::exit(2);
+    }
 }
 
 fn best<F: FnMut()>(mut f: F) -> f64 {
@@ -39,34 +57,58 @@ fn best<F: FnMut()>(mut f: F) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
+fn main() {
+    check_mode();
+    let which = std::env::var("BENCH").unwrap_or_default();
+    if which != "enc" {
+        decoder();
+    }
+    if which != "dec" {
+        encoder();
+    }
+}
+
+/// Prints one table row.
 fn row(name: &str, rust: f64, c: f64, frames: usize) {
     let (ur, uc) = (rust / frames as f64 * 1e6, c / frames as f64 * 1e6);
     println!("{name:<6} {ur:>10.3} {uc:>10.3} {:>7.2}x", uc / ur);
 }
 
-fn main() {
-    if let Ok(m) = std::env::var("BENCH_MODE")
-        && !MODES.contains(&m.as_str())
-    {
-        eprintln!(
-            "bench: unknown BENCH_MODE '{m}' (modes: {})",
-            MODES.join(" ")
-        );
-        std::process::exit(2);
+/// The "all" row (every mode timed: not with `BENCH_MODE`, nor in a stages build).
+fn total(tr: f64, tc: f64, tn: usize) {
+    if tn > 0 && std::env::var("BENCH_MODE").is_err() {
+        row("all", tr, tc, tn);
+        println!("({tn} frames/rep, best of {})", reps());
     }
-    if std::env::var("BENCH").as_deref() == Ok("enc") {
-        encoder();
-        return;
-    }
+}
+
+/// `--cfg codec_stages` (`BENCH=stages`): µs per frame per stage (mean of all reps, timer
+/// overhead included), then the frame's total.
+#[cfg(codec_stages)]
+fn stages_row(name: &str, n: usize, frames: usize) {
+    let ns = amr_wb::stages::take();
+    let per = (frames * reps()) as f64 * 1e3;
+    let cols: String = ns[..n]
+        .iter()
+        .map(|&v| format!(" {:>13.2}", v as f64 / per))
+        .collect();
+    let total = ns.iter().sum::<u64>() as f64 / per;
+    println!("stages {name:<5}{cols}  = {total:.2}");
+}
+
+/// The stage table's header.
+#[cfg(codec_stages)]
+fn stages_head(side: &str, names: &[&str]) {
+    let cols: String = names.iter().map(|n| format!(" {n:>13}")).collect();
+    println!("stages {side}  {cols}");
+}
+
+/// Decoder on the single-mode vectors' serial bits (no DTX), Rust vs opencore, both the same
+/// frame loop (homing test, decode, 14-bit output).
+fn decoder() {
     let cases = common::cases();
     #[cfg(codec_stages)]
-    println!(
-        "stages dec  {}",
-        amr_wb::stages::NAMES
-            .iter()
-            .map(|n| format!(" {n:>11}"))
-            .collect::<String>()
-    );
+    stages_head("dec", &amr_wb::stages::NAMES_DEC);
     println!("decoder {:>9} {:>10} {:>8}", "rust µs", "c µs", "speedup");
     let (mut tr, mut tc, mut tn) = (0.0, 0.0, 0usize);
     for name in MODES.iter().filter(|n| wanted(n)) {
@@ -86,16 +128,9 @@ fn main() {
                 }
             }
         });
-        // `--cfg codec_stages` (`BENCH=stages`): µs per frame per stage (mean of all reps)
         #[cfg(codec_stages)]
         {
-            let ns = amr_wb::stages::take();
-            let per = (frames * reps()) as f64 * 1e3;
-            let cols: String = ns[..amr_wb::stages::NAMES.len()]
-                .iter()
-                .map(|&v| format!(" {:>11.2}", v as f64 / per))
-                .collect();
-            println!("stages {name:<4}{cols}");
+            stages_row(name, amr_wb::stages::NAMES_DEC.len(), frames);
             continue;
         }
         // the C reads prms without writing them: one copy outside the timing
@@ -126,26 +161,15 @@ fn main() {
         row(name, rust, c, frames);
         (tr, tc, tn) = (tr + rust, tc + c, tn + frames);
     }
-    if std::env::var("BENCH_MODE").is_err() {
-        row("all", tr, tc, tn);
-    }
-    // `BENCH=stages`: the encoder's stages too
-    #[cfg(codec_stages)]
-    encoder();
+    total(tr, tc, tn);
 }
 
-/// `BENCH=enc`: the encoders on the single-mode vectors' input PCM (T00..T20, no DTX), Rust vs
-/// vo-amrwbenc, both through their frame loops (homing test, 14-bit input, serial output).
+/// Encoder (DTX off) on the single-mode vectors' input PCM (T00..T20), Rust vs vo-amrwbenc,
+/// both through their frame loops (homing test, 14-bit input, serial output).
 fn encoder() {
-    let cases = common::enc_cases();
+    let cases = common::encoder_cases();
     #[cfg(codec_stages)]
-    println!(
-        "stages enc  {}",
-        amr_wb::stages::NAMES_ENC
-            .iter()
-            .map(|n| format!(" {n:>9}"))
-            .collect::<String>()
-    );
+    stages_head("enc", &amr_wb::stages::NAMES_ENC);
     println!("encoder {:>9} {:>10} {:>8}", "rust µs", "c µs", "speedup");
     let (mut tr, mut tc, mut tn) = (0.0, 0.0, 0usize);
     for (m, name) in MODES.iter().enumerate().filter(|(_, n)| wanted(n)) {
@@ -166,18 +190,9 @@ fn encoder() {
                 }
             }
         });
-        // `--cfg codec_stages`: µs per frame per encoder stage (mean of all reps), then the
-        // per-frame total
         #[cfg(codec_stages)]
         {
-            let ns = amr_wb::stages::take();
-            let per = (frames * reps()) as f64 * 1e3;
-            let cols: String = ns[..amr_wb::stages::NAMES_ENC.len()]
-                .iter()
-                .map(|&v| format!(" {:>9.2}", v as f64 / per))
-                .collect();
-            let total = ns.iter().sum::<u64>() as f64 / per;
-            println!("stages {name:<4}{cols}  = {total:.2}");
+            stages_row(name, amr_wb::stages::NAMES_ENC.len(), frames);
             continue;
         }
         let c = best(|| {
@@ -204,7 +219,5 @@ fn encoder() {
         row(name, rust, c, frames);
         (tr, tc, tn) = (tr + rust, tc + c, tn + frames);
     }
-    if std::env::var("BENCH_MODE").is_err() {
-        row("all", tr, tc, tn);
-    }
+    total(tr, tc, tn);
 }

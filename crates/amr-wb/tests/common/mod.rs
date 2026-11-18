@@ -211,7 +211,7 @@ fn enc_case(root: &Path, rel: &Path) -> EncCase {
 
 /// All encoder cases, sorted by name: `T/**/*.cod` with an input, then `S/Sync_<mode>`
 /// (`syncNNN`: `seqsync.inp`, homing frames then speech, delayed by NNN zero samples).
-pub fn enc_cases() -> Vec<EncCase> {
+pub fn encoder_cases() -> Vec<EncCase> {
     let root = vectors_dir().join("T");
     let mut cods = Vec::new();
     let mut stack = vec![root.clone()];

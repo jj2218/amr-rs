@@ -24,12 +24,14 @@ mod vad;
 /// The portable bodies of the dispatched kernels (`crate::simd`).
 pub(crate) mod kernels {
     pub(crate) use super::acelp2::{acelp_2t64_fx_portable, cor_h_x_portable};
-    pub(crate) use super::acelp4::acelp_4t64_fx_portable;
+    pub(crate) use super::acelp4::{acelp_4t64_fx_portable, dots4_portable};
     pub(crate) use super::filters::{convolve_portable, residu_portable, syn_filt_portable};
     pub(crate) use super::lpc::{
         autocorr_portable, az_isp_portable, qpisf_2s_36b_portable, qpisf_2s_46b_portable,
     };
-    pub(crate) use super::pitch::pitch_fr4_portable;
+    #[cfg_attr(any(portable, not(target_arch = "x86_64")), allow(unused_imports))]
+    pub(crate) use super::pitch::LAGS_V_MAX; // the AVX2 body's range bound
+    pub(crate) use super::pitch::{Lags, norm_lags_portable, pitch_fr4_portable};
     pub(crate) use super::pitch_ol::pitch_med_ol_portable;
     pub(crate) use super::preprocess::{NB_COEF_DOWN, decim_12k8_portable};
 }

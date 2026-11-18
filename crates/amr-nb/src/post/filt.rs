@@ -276,7 +276,7 @@ pub(crate) fn weight_ai(a: &[i16], fac: &[i16], a_exp: &mut [i16]) {
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::post::test_gen::{coefs, lpc, signal};
     use crate::testutil::{N, Rng};
@@ -409,7 +409,7 @@ mod vs_c {
     }
 
     /// `simd::residu_block` is its array form on any coefficients and window, full scale too
-    /// (on x86_64; elsewhere the two are one function and `residu_vs_c` is the oracle).
+    /// (on x86_64; elsewhere the two are one function and `post_residu_vs_ref` is the oracle).
     #[test]
     fn residu_block_is_the_array_form() {
         let mut g = Rng::new(13);
@@ -427,7 +427,7 @@ mod vs_c {
     }
 
     #[test]
-    fn post_syn_filt_vs_c() {
+    fn post_syn_filt_vs_ref() {
         let mut g = Rng::new(1);
         // The reference's Syn_filt holds lg + M samples in a 80-sample buffer: lg <= 70.
         let lgs = [10usize, 11, 12, 22, 40, 41, 69, 70];
@@ -449,7 +449,7 @@ mod vs_c {
     /// history near `level`, and x chosen per sample to hold the output there (the second
     /// partial sum then passes 2^31 for the larger levels).
     #[test]
-    fn post_syn_filt_saturating_chain_vs_c() {
+    fn post_syn_filt_saturating_chain_vs_ref() {
         let mut g = Rng::new(5);
         let mut a = [0i16; M + 1];
         (a[0], a[1], a[2]) = (32767, -32768, 32767);
@@ -476,7 +476,7 @@ mod vs_c {
     /// path decides most cases, the exact fallback the rest (both counted, so a change of
     /// the generator can't silently drop either).
     #[test]
-    fn post_syn_filt_stable_vs_c() {
+    fn post_syn_filt_stable_vs_ref() {
         let mut g = Rng::new(3);
         let lgs = [10usize, 11, 16, 22, 40, 41, 69, 70]; // lg <= 70, as above
         let (mut fast, mut exact) = (0, 0);
@@ -506,7 +506,7 @@ mod vs_c {
     /// output is a fixed point at 2047, and `x[p] = 32767` makes the accumulator hit the
     /// boundary exactly at sample `p` (in both the `mem` and the `y` history loops).
     #[test]
-    fn post_syn_filt_boundary_vs_c() {
+    fn post_syn_filt_boundary_vs_ref() {
         let mut a = [0i16; M + 1];
         a[0] = 4096;
         a[2] = -1;
@@ -518,7 +518,7 @@ mod vs_c {
     }
 
     #[test]
-    fn post_residu_vs_c() {
+    fn post_residu_vs_ref() {
         let mut g = Rng::new(2);
         let lgs = [0usize, 4, 5, 7, 40, 41, 43, 160];
         for case in 0..N / 4 {
@@ -544,7 +544,7 @@ mod vs_c {
     }
 
     #[test]
-    fn post_weight_ai_vs_c() {
+    fn post_weight_ai_vs_ref() {
         let mut g = Rng::new(3);
         for case in 0..N {
             let mut a = [0i16; M + 1];

@@ -4,7 +4,6 @@
 //!
 //! Bit-exact ports of opencore-amr 0.1.6 (Apache-2.0) `common/src/{lsp_lsf,reorder,lsp_az,
 //! int_lpc}.cpp` and `dec/src/{int_lsf,d_plsf,d_plsf_3,d_plsf_5,lsp_avg}.cpp`.
-#![allow(dead_code)] // wired into the decoder later
 #![allow(clippy::needless_range_loop)] // index loops mirror the C code 1:1
 
 use crate::basic_op::{
@@ -517,7 +516,7 @@ pub(crate) fn lsp_avg(st: &mut LspAvgState, lsp: &[i16], ov: &mut Flag) {
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::testutil::{N, Rng};
     use opencore_sys as _;
@@ -708,7 +707,7 @@ mod vs_c {
     }
 
     #[test]
-    fn lpc_lsf_lsp_vs_c() {
+    fn lpc_lsf_lsp_vs_ref() {
         let mut g = Rng::new(1);
         for _ in 0..N {
             let lsf = rand_lsf(&mut g);
@@ -733,7 +732,7 @@ mod vs_c {
     }
 
     #[test]
-    fn lpc_reorder_lsf_vs_c() {
+    fn lpc_reorder_lsf_vs_ref() {
         let mut g = Rng::new(2);
         for _ in 0..N {
             let mut r = [0i16; M];
@@ -757,7 +756,7 @@ mod vs_c {
 
     /// Valid LSPs, and every 4th case arbitrary ones (large and wrapping polynomial coefficients).
     #[test]
-    fn lpc_lsp_az_vs_c() {
+    fn lpc_lsp_az_vs_ref() {
         let mut g = Rng::new(3);
         for k in 0..N {
             let lsp = if k % 4 == 0 {
@@ -774,7 +773,7 @@ mod vs_c {
     }
 
     #[test]
-    fn lpc_int_lpc_vs_c() {
+    fn lpc_int_lpc_vs_ref() {
         let mut g = Rng::new(4);
         for _ in 0..N / 4 {
             let (old, mid, new) = (rand_lsp(&mut g), rand_lsp(&mut g), rand_lsp(&mut g));
@@ -819,7 +818,7 @@ mod vs_c {
     }
 
     #[test]
-    fn lpc_int_lsf_vs_c() {
+    fn lpc_int_lsf_vs_ref() {
         let mut g = Rng::new(5);
         for _ in 0..N {
             let (mut old, mut new) = ([0i16; M], [0i16; M]);
@@ -843,7 +842,7 @@ mod vs_c {
     }
 
     #[test]
-    fn lpc_d_plsf_reset_init_vs_c() {
+    fn lpc_d_plsf_reset_init_vs_ref() {
         let t = tbls();
         let mut g = Rng::new(6);
         for _ in 0..10_000 {
@@ -868,7 +867,7 @@ mod vs_c {
     }
 
     #[test]
-    fn lpc_d_plsf_3_vs_c() {
+    fn lpc_d_plsf_3_vs_ref() {
         let mut t = tbls();
         let mut g = Rng::new(7);
         let mut seen = [[0usize; 2]; 9];
@@ -930,7 +929,7 @@ mod vs_c {
     }
 
     #[test]
-    fn lpc_d_plsf_5_vs_c() {
+    fn lpc_d_plsf_5_vs_ref() {
         let mut t = tbls();
         let mut g = Rng::new(8);
         for seq in 0..200 {
@@ -973,7 +972,7 @@ mod vs_c {
     }
 
     #[test]
-    fn lpc_lsp_avg_vs_c() {
+    fn lpc_lsp_avg_vs_ref() {
         let t = tbls();
         let mut g = Rng::new(9);
         for seq in 0..200 {

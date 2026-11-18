@@ -153,7 +153,7 @@ pub(crate) fn post_filter(
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::post::test_gen::{coefs, signal};
     use crate::testutil::{N, Rng};

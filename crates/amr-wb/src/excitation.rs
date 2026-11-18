@@ -45,7 +45,31 @@ pub(crate) fn pred_lt4(buf: &mut [i16], pos: usize, t0: i16, frac: i16, l_subfr:
         .map(|&v| (v as i32).abs())
         .max()
         .unwrap_or(0);
-    for n in 0..l_subfr {
+    // Blocks of outputs on `fir32`'s tap pairs while the bound holds: a block of B outputs at
+    // n0 reads buf[start + n0..start + n0 + B + 31], all before pos + n0 when pos - start >=
+    // B + 31 (pos - start = t0 + 15 or 16 >= 49): no output reads one of its own block. The
+    // sum is round(L_shl(2d, 1)) = clamp16((4d + 2^15) >> 16) = clamp16((d + 2^13) >> 14)
+    // with |d| < 2^30 (the bound).
+    let mut n0 = 0;
+    let d = pos - start;
+    while max < limit {
+        let (src, dst) = buf.split_at_mut(pos + n0);
+        let x = &src[start + n0..];
+        if d >= 63 && n0 + 32 <= l_subfr {
+            let y: &mut [i16; 32] = (&mut dst[..32]).try_into().unwrap();
+            crate::simd::fir32::<32, 14>(x, fir, y);
+            max = max.max(y.iter().map(|&v| (v as i32).abs()).max().unwrap_or(0));
+            n0 += 32;
+        } else if d >= 47 && n0 + 16 <= l_subfr {
+            let y: &mut [i16; 16] = (&mut dst[..16]).try_into().unwrap();
+            crate::simd::fir32::<16, 14>(x, fir, y);
+            max = max.max(y.iter().map(|&v| (v as i32).abs()).max().unwrap_or(0));
+            n0 += 16;
+        } else {
+            break;
+        }
+    }
+    for n in n0..l_subfr {
         let x: &[i16; 2 * L_INTERPOL2] = buf[start + n..][..2 * L_INTERPOL2].try_into().unwrap();
         let sum = if max < limit {
             dot(x, fir).wrapping_shl(1)

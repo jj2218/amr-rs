@@ -18,7 +18,7 @@ mod vad;
 mod vad2;
 
 #[cfg(test)]
-mod vs_c;
+mod vs_ref;
 
 use crate::basic_op::{Flag, add, extract_h, l_mult, l_shl, round, sub};
 use crate::cnst::{L_FRAME, L_INTERPOL, L_SUBFR, M, MP1, Mode, PIT_MAX};
@@ -328,7 +328,7 @@ impl CodAmr {
         } else {
             false
         };
-        crate::stages::mark(crate::stages::PRE);
+        crate::stages::mark(crate::stages::E_PRE);
         lpc(
             &mut self.lpc_st,
             mode,
@@ -382,7 +382,7 @@ impl CodAmr {
             v.l_r0 = 0;
         }
 
-        crate::stages::mark(crate::stages::LPC);
+        crate::stages::mark(crate::stages::E_LPC);
         let mut t_op = [0i16; L_FRAME / L_FRAME_BY2];
         for sub_nr in 0..2 {
             let i_subfr = sub_nr * L_FRAME_BY2;
@@ -429,7 +429,7 @@ impl CodAmr {
             }
         }
 
-        crate::stages::mark(crate::stages::OL);
+        crate::stages::mark(crate::stages::E_OL);
         if used_mode != Mode::MRDTX {
             self.subframes(
                 used_mode, &a_t, &aq_t, &t_op, lsp_flag, &mut synth, ana, ana_pos,
@@ -505,7 +505,7 @@ impl CodAmr {
                 &mut xn,
                 &mut res,
             );
-            crate::stages::mark(crate::stages::SUB_PRE);
+            crate::stages::mark(crate::stages::E_SUB_PRE);
             if mode == Mode::MR475 && even {
                 h1_sf0 = self.h1;
             }
@@ -529,7 +529,7 @@ impl CodAmr {
                 &mut ana_pos,
                 ov,
             );
-            crate::stages::mark(crate::stages::CL);
+            crate::stages::mark(crate::stages::E_CL);
             if sub_nr == 0 && self.ol_gain_flg[0] > 0 {
                 self.old_lags[1] = cl.t0;
             }
@@ -551,7 +551,7 @@ impl CodAmr {
                 sub_nr,
                 ov,
             );
-            crate::stages::mark(crate::stages::CB);
+            crate::stages::mark(crate::stages::E_CB);
             let mut g = Gains {
                 gain_pit: cl.gain_pit,
                 gain_cod: 0,
@@ -576,7 +576,7 @@ impl CodAmr {
                 &mut ana_pos,
                 ov,
             );
-            crate::stages::mark(crate::stages::GAIN);
+            crate::stages::mark(crate::stages::E_GAIN);
             update_gp_clipping(&mut self.ton_stab_st, g.gain_pit);
             let speech = &self.old_speech[SPEECH..];
             if mode != Mode::MR475 {
@@ -598,7 +598,7 @@ impl CodAmr {
                     &mut self.old_exc[EXC..],
                     &mut self.sharp,
                 );
-                crate::stages::mark(crate::stages::SUB_POST);
+                crate::stages::mark(crate::stages::E_SUB_POST);
             } else if even {
                 i_subfr_sf0 = i_subfr;
                 xn_sf0 = xn;
@@ -624,7 +624,7 @@ impl CodAmr {
                     &mut self.old_exc[EXC..],
                     &mut self.sharp,
                 );
-                crate::stages::mark(crate::stages::SUB_POST);
+                crate::stages::mark(crate::stages::E_SUB_POST);
                 self.sharp = sharp_save;
             } else {
                 self.mem_err[..M].copy_from_slice(&mem_err_save);
@@ -657,7 +657,7 @@ impl CodAmr {
                     &mut self.old_exc[EXC..],
                     &mut sharp_save,
                 );
-                crate::stages::mark(crate::stages::SUB_POST);
+                crate::stages::mark(crate::stages::E_SUB_POST);
                 aq_off += MP1;
                 let speech_sf = &self.old_speech[SPEECH + i_subfr - M..];
                 subframe_pre_proc(
@@ -672,7 +672,7 @@ impl CodAmr {
                     &mut xn,
                     &mut res,
                 );
-                crate::stages::mark(crate::stages::SUB_PRE);
+                crate::stages::mark(crate::stages::E_SUB_PRE);
                 pred_lt_3or6(
                     &mut self.old_exc,
                     EXC + i_subfr,
@@ -702,7 +702,7 @@ impl CodAmr {
                     &mut self.old_exc[EXC..],
                     &mut self.sharp,
                 );
-                crate::stages::mark(crate::stages::SUB_POST);
+                crate::stages::mark(crate::stages::E_SUB_POST);
             }
         }
     }
@@ -817,7 +817,7 @@ impl Encoder {
         if homing {
             self.reset();
         }
-        crate::stages::mark(crate::stages::TAIL);
+        crate::stages::mark(crate::stages::E_TAIL);
         Frame {
             frame_type,
             mode,

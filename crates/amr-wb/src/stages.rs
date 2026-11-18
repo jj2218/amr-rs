@@ -1,24 +1,24 @@
 //! Decoder and encoder stage timers for time attribution (callgrind counts instructions, `perf`
-//! is not available): `--cfg codec_stages` (`BENCH=stages CRATE=amr-wb just bench`) times the
-//! stretch since the previous mark and adds it to the stage being marked; otherwise every call is
-//! a no-op.
+//! is not available): `--cfg codec_stages` (`CRATE=amr-wb BENCH=stages just bench`) times the
+//! stretch since the previous mark and adds it to the stage being marked; otherwise every call is a no-op.
+//! Decoder stages are `D_*` (`NAMES_DEC`), encoder stages `E_*` (`NAMES_ENC`), in frame order.
 
 /// Stage slots.
-pub const N: usize = 12;
+pub const N: usize = 11;
 /// Decoder stage indices (`mark` after each stage).
-pub const PARAMS: usize = 0;
-pub const EXC: usize = 1;
-pub const LF: usize = 2;
-pub const OVERSAMP: usize = 3;
-pub const HF_GAIN: usize = 4;
-pub const HF_SYN: usize = 5;
-pub const HF_FIR: usize = 6;
-pub const TAIL: usize = 7;
-/// Their names, as `BENCH=stages` prints them.
-pub const NAMES: [&str; 8] = [
+pub const D_PARAMS: usize = 0;
+pub const D_EXC: usize = 1;
+pub const D_LF: usize = 2;
+pub const D_OVERSAMP: usize = 3;
+pub const D_HF_GAIN: usize = 4;
+pub const D_HF_SYN: usize = 5;
+pub const D_HF_FIR: usize = 6;
+pub const D_TAIL: usize = 7;
+/// The decoder's stage names.
+pub const NAMES_DEC: [&str; 8] = [
     "isf+dtx", "exc", "lf_synth", "oversamp", "hf_gain", "hf_syn", "hf_fir", "tail",
 ];
-/// Encoder stage indices, in frame order (the same slots, `NAMES_ENC`).
+/// Encoder stage indices (`mark` after each stage).
 pub const E_PRE: usize = 0;
 pub const E_VAD: usize = 1;
 pub const E_LPC: usize = 2;

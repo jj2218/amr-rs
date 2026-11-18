@@ -3,7 +3,6 @@
 //! output high-pass filter (`Post_Process`).
 //! Bit-exact ports of opencore-amr 0.1.6 (Apache-2.0) `common/src/{syn_filt,residu,weight_a}.cpp`
 //! and `dec/src/{preemph,agc,pstfilt,post_pro}.cpp`.
-#![allow(dead_code)] // integrated into the decoder later
 
 pub(crate) use crate::cnst::{L_FRAME, L_SUBFR, M, MP1, Mode};
 pub(crate) mod agc;

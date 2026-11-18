@@ -289,19 +289,19 @@ decode, 14-bit output) on pre-parsed serial bits.
 
 | mode | Rust | C | speedup |
 |---|---:|---:|---:|
-| 6.60 | 19.3 | 35.5 | 1.85× |
-| 8.85 | 16.4 | 33.6 | 2.04× |
-| 12.65 | 15.6 | 30.9 | 1.98× |
-| 14.25 | 15.6 | 31.2 | 2.00× |
-| 15.85 | 15.6 | 31.8 | 2.03× |
-| 18.25 | 16.1 | 32.7 | 2.03× |
-| 19.85 | 16.1 | 33.1 | 2.05× |
-| 23.05 | 16.4 | 34.2 | 2.08× |
-| 23.85 | 18.0 | 37.7 | 2.09× |
-| **all** | **16.6** | **33.4** | **≈2.0×** |
+| 6.60 | 19.7 | 34.6 | 1.76× |
+| 8.85 | 14.5 | 32.0 | 2.20× |
+| 12.65 | 13.9 | 29.7 | 2.13× |
+| 14.25 | 13.6 | 29.7 | 2.19× |
+| 15.85 | 13.5 | 30.0 | 2.21× |
+| 18.25 | 13.9 | 30.8 | 2.21× |
+| 19.85 | 13.8 | 31.3 | 2.26× |
+| 23.05 | 14.1 | 32.3 | 2.29× |
+| 23.85 | 14.9 | 35.4 | 2.38× |
+| **all** | **14.7** | **31.8** | **≈2.2×** |
 
-Measured 2026-11-15 (two runs: all 2.00× and 2.02×; 8.85 varies 1.90–2.04×). The frame decoder
-runs in an AVX2 copy of the same source when the CPU has AVX2 (+4% over the portable build).
+Measured 2026-11-18 (two runs: all 2.16× and 2.21×; 2026-11-15: 2.0×). The frame decoder
+runs in an AVX2 copy of the same source when the CPU has AVX2, its FIRs on AVX2 kernels.
 Exactness costs: the specification's saturating chains are serial where opencore's plain sums
 vectorise (the straight port with the corrections ran at 0.76×). The gains come from exact
 reformulations: bounds that prove a chain can't saturate (checked after a fast pass over the
@@ -399,19 +399,19 @@ run their frame loop (homing test, 14-bit input, serial output); vo-amrwbenc at 
 
 | mode | Rust | C | speedup |
 |---|---:|---:|---:|
-| 6.60 | 62.0 | 94.5 | **1.52×** |
-| 8.85 | 76.5 | 107.6 | **1.41×** |
-| 12.65 | 82.2 | 119.0 | **1.45×** |
-| 14.25 | 87.9 | 126.2 | **1.44×** |
-| 15.85 | 88.4 | 127.3 | **1.44×** |
-| 18.25 | 94.1 | 145.2 | **1.54×** |
-| 19.85 | 105.2 | 150.1 | **1.43×** |
-| 23.05 | 105.2 | 141.1 | **1.34×** |
-| 23.85 | 108.8 | 150.9 | **1.39×** |
-| **all** | **90.0** | **129.1** | **1.43×** |
+| 6.60 | 56.8 | 91.4 | **1.61×** |
+| 8.85 | 65.9 | 104.4 | **1.59×** |
+| 12.65 | 74.0 | 117.5 | **1.59×** |
+| 14.25 | 78.2 | 124.3 | **1.59×** |
+| 15.85 | 79.9 | 126.3 | **1.58×** |
+| 18.25 | 82.1 | 130.5 | **1.59×** |
+| 19.85 | 84.5 | 132.4 | **1.57×** |
+| 23.05 | 84.5 | 132.9 | **1.57×** |
+| 23.85 | 89.0 | 134.1 | **1.51×** |
+| **all** | **77.2** | **121.5** | **1.57×** |
 
-Measured 2026-11-17 on main after PRs #61 and #64 (before #64: 1.37×; 2026-11-16: 1.21×; the straight port: 0.46×,
-309.8 vs 142.0 µs).
+Measured 2026-11-18 (two runs: all 1.57× and 1.59×; 2026-11-17: 1.43×; 2026-11-16: 1.21×; the
+straight port: 0.46×, 309.8 vs 142.0 µs).
 Exact fast paths under proven bounds (the reference's saturation is kept: every guard falls
 back to its chain, each with a mutant-checked differential test), the hot kernels dispatched
-to AVX2 per call; the steps are in the development log ("AMR-WB encoder speed").
+to AVX2 per call.

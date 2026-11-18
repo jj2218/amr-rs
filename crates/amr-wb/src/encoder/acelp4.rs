@@ -7,6 +7,7 @@ use crate::basic_op::dot_product12;
 use crate::cnst::L_SUBFR;
 use crate::enc_tables::TIPOS;
 pub(crate) use crate::simd::acelp_4t64_fx;
+use crate::simd::dots4;
 
 const NB_PULSE_MAX: usize = 24;
 const NB_TRACK: usize = 4;
@@ -152,15 +153,17 @@ pub(crate) fn acelp_4t64_fx_portable(
     }
     // rrixiy[k][16i + j] = mult(rrixiy, sign or vec of y): 32767 for equal signs, -32768
     // otherwise; in i32 lanes with mult's clamp, rr_max per lane.
+    // neg[t][i]: sign[t + 4i] < 0 (sign is -32768 or 32767)
+    let neg: [[bool; NB_POS]; NB_TRACK] =
+        std::array::from_fn(|t| std::array::from_fn(|i| sign[t + STEP * i] < 0));
     let mut rr_max = [0i32; NB_TRACK];
     for k in 0..NB_TRACK {
-        let ty = (k + 1) % NB_TRACK;
         // per row sign of x: negate where the signs differ (mult by -32768), else mult by 32767
-        let sy: [bool; NB_POS] = std::array::from_fn(|j| sign[ty + STEP * j] < 0);
+        let sy = neg[(k + 1) % NB_TRACK];
         let flip = [sy, sy.map(|b| !b)];
         let mut m = [0i16; NB_POS];
         for (i, row) in rrixiy[k].as_chunks_mut::<NB_POS>().0.iter_mut().enumerate() {
-            sign_row(row, &flip[(sign[k + STEP * i] < 0) as usize], &mut m);
+            sign_row(row, &flip[neg[k][i] as usize], &mut m);
         }
         rr_max[k] = m.into_iter().max().unwrap_or(0) as i32;
     }
@@ -222,8 +225,9 @@ pub(crate) fn acelp_4t64_fx_portable(
         while j < nb_pulse {
             let (mut cor_x, mut cor_y) = ([0i16; NB_POS], [0i16; NB_POS]);
             let fast = HVec::new(&vec, h_abs);
-            cor_h_vec(h, &fast, &vec, ipos[j], &sign, &rrixix, &mut cor_x);
-            cor_h_vec(h, &fast, &vec, ipos[j + 1], &sign, &rrixix, &mut cor_y);
+            let (tx, ty) = (ipos[j], ipos[j + 1]);
+            cor_h_vec(h, &fast, &vec, tx, &neg[tx], &rrixix, &mut cor_x);
+            cor_h_vec(h, &fast, &vec, ty, &neg[ty], &rrixix, &mut cor_y);
             let (ix, iy) = search_ixiy(
                 nbpos[st],
                 ipos[j],
@@ -422,11 +426,20 @@ fn cor_h<const PLAIN: bool>(
 #[inline(always)]
 fn sign_row(row: &mut [i16; NB_POS], neg: &[bool; NB_POS], m: &mut [i16; NB_POS]) {
     for j in 0..NB_POS {
-        let c = row[j];
-        let pos = c - (c > 0) as i16 + (c == i16::MIN) as i16;
-        let v = if neg[j] { c.saturating_neg() } else { pos };
+        let v = mult_sign(row[j], neg[j]);
         row[j] = v;
         m[j] = m[j].max(v.abs());
+    }
+}
+
+/// `mult(c, s)` for the search's signs `s` = -32768 (`neg`) or 32767:
+/// `sat(-c)`, else `c - (c > 0) + (c == -32768)`.
+#[inline(always)]
+fn mult_sign(c: i16, neg: bool) -> i16 {
+    if neg {
+        c.saturating_neg()
+    } else {
+        c - (c > 0) as i16 + (c == i16::MIN) as i16
     }
 }
 
@@ -450,68 +463,64 @@ impl HVec {
 
 /// `cor_h_vec`: the correlation of `h` with `vec` at the track's positions, signed, plus
 /// the track's `rrixix` (the plain fixed-length sums when `fast` allows, else the C's chain).
+/// `neg`: the track's positions' signs (`sign[pos] < 0`).
 #[inline(always)]
 fn cor_h_vec(
     h: &[i16],
     fast: &HVec,
     vec: &[i16; L_SUBFR],
     track: usize,
-    sign: &[i16; L_SUBFR],
+    neg: &[bool; NB_POS],
     rrixix: &[[i16; NB_POS]; NB_TRACK],
     cor: &mut [i16; NB_POS],
 ) {
     let h: &[i16; L_SUBFR] = h[..L_SUBFR].try_into().unwrap();
-    let mut l = [0i32; NB_POS];
     match &fast.0 {
         // Position `pos` has `64 - pos` terms before the padding, so positions 4g..4g + 4 need
         // at most `64 - 16g`: each group's dots run only that far (fixed lengths, exact).
+        // s = Σ h·vec with |2s| < 2^31 (`HVec`), so round(L_shl(L_mac chain = 2s, 1)) =
+        // extract_h(sat(sat(4s) + 2^15)) = clamp16((4s + 2^15) >> 16) (saturation is a
+        // monotone clamp) = clamp16((s + 2^13) >> 14); mult by the sign as in `sign_row`.
         Some(p) => {
-            cor_h_vec_group::<64>(h, p, track, 0, &mut l);
-            cor_h_vec_group::<48>(h, p, track, 1, &mut l);
-            cor_h_vec_group::<32>(h, p, track, 2, &mut l);
-            cor_h_vec_group::<16>(h, p, track, 3, &mut l);
+            let mut s = [0i32; NB_POS];
+            s[0..4].copy_from_slice(&dots4::<64>(h, p, track));
+            s[4..8].copy_from_slice(&dots4::<48>(h, p, track + 16));
+            s[8..12].copy_from_slice(&dots4::<32>(h, p, track + 32));
+            s[12..16].copy_from_slice(&dots4::<16>(h, p, track + 48));
+            for i in 0..NB_POS {
+                let c = ((s[i] + (1 << 13)) >> 14).clamp(-32768, 32767) as i16;
+                cor[i] = mult_sign(c, neg[i]).saturating_add(rrixix[track][i]);
+            }
         }
         None => {
-            for (i, l) in l.iter_mut().enumerate() {
+            for i in 0..NB_POS {
                 let pos = track + STEP * i;
+                let mut l = 0i32;
                 for j in pos..L_SUBFR {
-                    *l = l_mac(*l, h[j - pos], vec[j]);
+                    l = l_mac(l, h[j - pos], vec[j]);
                 }
+                let corr = round(l_shl(l, 1));
+                cor[i] = add(mult_sign(corr, neg[i]), rrixix[track][i]);
             }
         }
     }
-    for i in 0..NB_POS {
-        let pos = track + STEP * i;
-        let corr = round(l_shl(l[i], 1));
-        cor[i] = add(mult(corr, sign[pos]), rrixix[track][i]);
-    }
 }
 
-/// `cor_h_vec`'s plain dots `2·Σ_{j<N} h[j]·p[pos + j]` for the 4 positions `i = 4g..4g + 4`
-/// (`pos = track + 4i`); `N >= 64 - 16g` covers every term before `p`'s zero padding.
+/// `cor_h_vec`'s plain dots `Σ_{j<N} h[j]·p[o + 4k + j]` (wrapping) for the 4 positions
+/// `o + 4k`, `k < 4`, `p` long enough: on AVX2 one pass shares each `h` load and one
+/// transposed reduction (`crate::simd::dots4`); this is its portable body and oracle.
 #[inline(always)]
-fn cor_h_vec_group<const N: usize>(
-    h: &[i16; L_SUBFR],
-    p: &[i16; 2 * L_SUBFR],
-    track: usize,
-    g: usize,
-    l: &mut [i32; NB_POS],
-) {
+pub(crate) fn dots4_portable<const N: usize>(h: &[i16; L_SUBFR], p: &[i16], o: usize) -> [i32; 4] {
     const { assert!(N <= L_SUBFR) };
-    debug_assert!(
-        N + 16 * g >= L_SUBFR,
-        "cor_h_vec_group: the dots stop before the padding"
-    );
     let h: &[i16; N] = h[..N].try_into().unwrap();
-    for i in 4 * g..4 * g + 4 {
-        let pos = track + STEP * i;
-        let v: &[i16; N] = p[pos..pos + N].try_into().unwrap();
+    std::array::from_fn(|k| {
+        let v: &[i16; N] = p[o + 4 * k..o + 4 * k + N].try_into().unwrap();
         let mut s = 0i32;
         for j in 0..N {
             s = s.wrapping_add(h[j] as i32 * v[j] as i32);
         }
-        l[i] = s << 1;
-    }
+        s
+    })
 }
 
 /// `search_ixiy`: the best pair of positions on tracks `track_x`, `track_y` (pulse 1 among
@@ -936,6 +945,34 @@ mod vs_ref {
                 (dnc, codec, yc, ixc),
                 "ACELP_4t64_fx {nb} {n}"
             );
+        }
+    }
+
+    /// `dots4` (the AVX2 body where available) against its portable body: full-range values
+    /// (the `pmaddwd` pair wrap at (-32768)^2 · 2 included), every group length and offset.
+    #[test]
+    fn dots4_matches_portable() {
+        let mut r = Rng::new(93);
+        fn check<const N: usize>(h: &[i16; L_SUBFR], p: &[i16], o: usize) {
+            let (a, b) = (dots4::<N>(h, p, o), dots4_portable::<N>(h, p, o));
+            assert_eq!(a, b, "dots4::<{N}> at {o}");
+        }
+        for n in 0..20_000 {
+            let edge = n % 4 == 0;
+            let mut v = || {
+                if edge {
+                    [i16::MIN, i16::MAX][(r.u64() & 1) as usize]
+                } else {
+                    r.i16()
+                }
+            };
+            let h: [i16; L_SUBFR] = std::array::from_fn(|_| v());
+            let p: Vec<i16> = (0..2 * L_SUBFR).map(|_| v()).collect();
+            let o = n % 52;
+            check::<16>(&h, &p, o);
+            check::<32>(&h, &p, o);
+            check::<48>(&h, &p, o);
+            check::<64>(&h, &p, o);
         }
     }
 

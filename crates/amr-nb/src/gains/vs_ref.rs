@@ -1,5 +1,5 @@
-//! Differential tests of the gains group against the C oracles: the TS 26.073 reference
-//! (`ref_*`) for the gain prediction and decoding, opencore for the rest.
+//! Differential tests of the gains group against the TS 26.073 reference (`ref_*`); opencore
+//! only for its table set and two state helpers (see the `extern` block).
 use super::*;
 use crate::testutil::{N, Rng};
 use opencore_sys as _;
@@ -69,7 +69,6 @@ struct CBgnScd {
 
 /// `CommonAmrTbls`: 34 table pointers.
 type CTbls = [*const i16; 34];
-const TBL_QUA_GAIN_CODE: usize = 17;
 const TBL_QUA_GAIN_PITCH: usize = 18;
 
 // The TS 26.073 reference, in the shape of the opencore functions these tests were written
@@ -345,22 +344,8 @@ fn qua_pair(g: &mut Rng) -> (i16, i16) {
     }
 }
 
-/// opencore's `L_add` overflows a signed int (UB) and gcc folds its saturation check away when
-/// `gc_pred` has already saturated `L_tmp` to MAX_32 (code energy ~0) and then adds a positive
-/// predictor term, so C wraps where the spec saturates. Keep the C oracle out of that UB: give
-/// such a zero-energy code vector one pulse (the decoder's codevectors always carry pulses).
-fn avoid_c_ub(code: &mut [i16; 40], st: &GcPredState) {
-    let ener: i64 = code
-        .iter()
-        .map(|&x| ((x as i32 * x as i32) >> 3) as i64)
-        .sum();
-    if ener == 0 && st.past_qua_en.iter().any(|&q| q > 0) {
-        code[0] = 4096;
-    }
-}
-
 #[test]
-fn gmed_n_vs_c() {
+fn gmed_n_vs_ref() {
     let mut g = Rng::new(1);
     for _ in 0..N {
         let n = (1 + g.u64() % 9) as i16;
@@ -427,7 +412,7 @@ fn gc_pred_vs_ref() {
 }
 
 #[test]
-fn d_gain_pitch_vs_c() {
+fn d_gain_pitch_vs_ref() {
     let t = c_tbls();
     for mode in Mode::ALL {
         for index in 0..16 {
@@ -522,7 +507,7 @@ fn dec_gain_vs_ref() {
 }
 
 #[test]
-fn ec_gains_vs_c() {
+fn ec_gains_vs_ref() {
     let mut g = Rng::new(5);
     let (mut rp, mut rc, mut rpred) = (
         EcGainPitchState::default(),
@@ -643,7 +628,7 @@ fn lsp_dev_sum_c(aver: &[i16; 10], lsp: &[i16; 10], cls: &mut [u32; 7]) -> (i16,
 /// full-range (sub saturates); some calls with one live lane (a saturated `shl` term alone).
 /// Every class is counted.
 #[test]
-fn lsp_dev_sum_vs_c() {
+fn lsp_dev_sum_vs_ref() {
     let mut g = Rng::new(61);
     let mut cls = [0u32; 7];
     let mut lone_sat = 0u32;
@@ -696,7 +681,7 @@ fn lsp_dev_sum_vs_c() {
 }
 
 #[test]
-fn cb_gain_average_vs_c() {
+fn cb_gain_average_vs_ref() {
     let mut g = Rng::new(6);
     let mut r = CbGainAverageState::default();
     let mut c = CCbAver::default();
@@ -781,7 +766,7 @@ fn cb_gain_average_vs_c() {
 }
 
 #[test]
-fn ex_ctrl_vs_c() {
+fn ex_ctrl_vs_ref() {
     let mut g = Rng::new(7);
     let mut scaled = 0;
     for k in 0..N {
@@ -833,7 +818,7 @@ fn ex_ctrl_vs_c() {
 }
 
 #[test]
-fn bgn_scd_vs_c() {
+fn bgn_scd_vs_ref() {
     let mut g = Rng::new(8);
     let mut r = BgnScdState::default();
     let mut c = CBgnScd {

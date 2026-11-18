@@ -3,6 +3,13 @@
 One section per release, newest first. The release commit in the repository carries the
 section of each crate it releases.
 
+## 0.3.1 (2026-11-18)
+Changed
+- Faster on x86-64 CPUs with AVX2 (detected at run time): the decoder is about 2.2× the speed of
+  opencore-amr (was 2.0×), the encoder about 1.6× vo-amrwbenc (was 1.43×; 1.51–1.61× per mode).
+  The output is unchanged (bit-exact on the 3GPP vectors and against the 3GPP reference); the
+  portable code's speed is unchanged.
+
 ## 0.3.0 (2026-11-17)
 Changed
 - The encoder is about 1.4× the speed of vo-amrwbenc (was 0.46×): 1.43× on average, 1.34–1.54×

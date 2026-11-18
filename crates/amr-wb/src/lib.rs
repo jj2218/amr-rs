@@ -25,7 +25,7 @@ mod dtx;
 mod enc_tables;
 mod encoder;
 mod excitation;
-mod gain;
+mod gains;
 mod lpc;
 pub mod rfc4867;
 mod simd;
@@ -41,7 +41,7 @@ mod tables;
 #[cfg(test)]
 mod testutil;
 #[cfg(test)]
-mod vs_c;
+mod vs_ref;
 
 pub use cnst::{L_FRAME16K, MAX_SERIAL_SIZE, Mode, RxFrameType, SID_BITS};
 pub use decoder::Decoder;

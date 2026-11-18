@@ -7,7 +7,7 @@ mod common;
 
 use amr_wb::{Encoder, Mode};
 use common::stress::Rng;
-use common::{cod_words, enc_cases};
+use common::{cod_words, encoder_cases};
 
 /// An input class with its parameters, held for a run of frames.
 #[derive(Clone, Copy, Debug)]
@@ -114,7 +114,7 @@ fn stream(seed: u64, frames: usize, dtx: bool, speech: &[i16]) -> Option<String>
 
 #[test]
 fn stress_streams_match_reference() {
-    let speech: Vec<i16> = enc_cases()
+    let speech: Vec<i16> = encoder_cases()
         .into_iter()
         .filter(|c| c.name.contains("T00") || c.name.contains("T05"))
         .flat_map(|c| c.input)
@@ -137,7 +137,7 @@ fn stress_streams_match_reference() {
 /// Speech with pauses, 600 frames: 30 frames of T00's speech (repeated), then 30 of silence
 /// (the DTX periods), with the mode changing every 60 frames (each mode).
 fn speech_with_pauses() -> Vec<(Mode, [i16; 320])> {
-    let speech: Vec<i16> = enc_cases()
+    let speech: Vec<i16> = encoder_cases()
         .into_iter()
         .find(|c| c.name.contains("T00"))
         .unwrap()

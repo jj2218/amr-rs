@@ -47,7 +47,7 @@ pub(crate) fn preemphasis(
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::basic_op::{mult, sub};
     use crate::post::test_gen::signal;
@@ -75,7 +75,7 @@ mod vs_c {
     }
 
     #[test]
-    fn post_preemphasis_vs_c() {
+    fn post_preemphasis_vs_ref() {
         let mut g = Rng::new(10);
         let (mut mult_sat, mut sub_sat) = (0u32, 0u32);
         for seq in 0..20 {

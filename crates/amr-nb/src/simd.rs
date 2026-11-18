@@ -15,6 +15,9 @@
 //! (x86_64 baseline: both paths, except `vq_subvec_sse2`, the portable body of a dispatched
 //! kernel) each have an array form for other targets; `--cfg amr_nb_arrays` selects those on
 //! x86 too (`just test` runs the vectors with it).
+//!
+//! The frame decoder has no AVX2 copy (amr-wb's has, +4% there): here it measured 1.001×, as
+//! its hot filters are SSE2 intrinsics already.
 #![allow(unsafe_code)] // the approved scope: calls into #[target_feature] copies, below
 
 use crate::basic_op::Flag;
@@ -47,6 +50,7 @@ macro_rules! kernels {
     ($($(#[$m:meta])* $vis:vis fn $name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty)?
         = $body:path $(, avx2 $avx:path)?;)*) => {$(
         $(#[$m])*
+        #[allow(clippy::too_many_arguments)] // the C signatures
         $vis fn $name($($arg: $ty),*) $(-> $ret)? {
             #[cfg(all(target_arch = "x86_64", not(portable)))]
             if avx2() {

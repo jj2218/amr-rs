@@ -167,7 +167,7 @@ pub(crate) fn agc2(sig_in: &[i16], sig_out: &mut [i16], l_trm: usize, ov: &mut F
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::post::test_gen::signal;
     use crate::testutil::Rng;
@@ -205,7 +205,7 @@ mod vs_c {
     const LENS: [usize; 5] = [40, 40, 160, 1, 13];
 
     #[test]
-    fn post_energy_vs_c() {
+    fn post_energy_vs_ref() {
         let mut g = Rng::new(20);
         for case in 0..50_000 {
             let l = LENS[case % LENS.len()];
@@ -229,7 +229,7 @@ mod vs_c {
     }
 
     #[test]
-    fn post_agc_vs_c() {
+    fn post_agc_vs_ref() {
         let mut g = Rng::new(21);
         for seq in 0..20 {
             let mut st = AgcState { past_gain: g.i16() };
@@ -259,7 +259,7 @@ mod vs_c {
     }
 
     #[test]
-    fn post_agc2_vs_c() {
+    fn post_agc2_vs_ref() {
         let mut g = Rng::new(22);
         for case in 0..50_000 {
             let l = LENS[case % LENS.len()];

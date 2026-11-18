@@ -2,7 +2,7 @@
 //! proving the harness with the TS 26.173 reference and vo-amrwbenc.
 mod common;
 
-use common::{EncCase, enc_cases};
+use common::{EncCase, encoder_cases};
 
 /// Encodes a case frame by frame with `enc(mode, dtx, frame, out) -> words`.
 fn encode(
@@ -65,7 +65,7 @@ fn frames(w: &[i16]) -> Vec<&[i16]> {
 /// cases (TS 26.174, as TS 26.074 §8.2) compare the 2nd frame after the last decoder homing
 /// frame, the output for an all-0x0008 input frame.
 fn run(label: &str, encode: impl Fn(&EncCase) -> Vec<i16> + Sync, threads: usize) -> Vec<String> {
-    let cases = enc_cases();
+    let cases = encoder_cases();
     let dhf: Vec<Vec<i16>> = (0..9)
         .map(|m| {
             encode(&EncCase {

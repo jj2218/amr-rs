@@ -166,7 +166,7 @@ pub(crate) fn block_portable(src: &[i16; BLOCK_IN], k: &[i16; 2 * L_INTER10]) ->
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::super::{L_INTERPOL, L_SUBFR, PIT_MAX};
     use super::*;
     use crate::testutil::{N, Rng};
@@ -201,7 +201,7 @@ mod vs_c {
     }
 
     #[test]
-    fn pred_lt_3or6_vs_c() {
+    fn pred_lt_3or6_vs_ref() {
         let mut g = Rng::new(20);
         for n in 0..N / 4 {
             // Mostly realistic excitation amplitudes, sometimes full-range (wrapping sums).

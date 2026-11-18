@@ -14,7 +14,7 @@ use crate::lpc::{isf_extrapolation, isp_az, weight_amrwb_lpc};
 use crate::tables::{FIR_6K_7K, FIR_7K, FIR_UP, HP_GAIN};
 
 const L_FILT: usize = 12;
-const L_FIR: usize = 30;
+pub(crate) const L_FIR: usize = 30;
 
 /// Synthesis filter memories (part of `Decoder_State`).
 #[derive(Clone)]
@@ -450,17 +450,8 @@ fn fir31(x: &[i16; L_FIR + L_SUBFR16K + 1], fir: &[i16; L_FIR + 1], out: &mut [i
     let max = x.iter().map(|&v| (v as i64).abs()).max().unwrap();
     let fir32: [i16; L_FIR + 2] = std::array::from_fn(|k| if k <= L_FIR { fir[k] } else { 0 });
     if 2 * max * abs_sum < 1 << 31 {
-        // transposed: the outputs in lanes, one pass per tap
-        let mut acc = [0i32; L_SUBFR16K];
-        for (k, &c) in fir32.iter().enumerate() {
-            let w: &[i16; L_SUBFR16K] = x[k..k + L_SUBFR16K].try_into().unwrap();
-            for (s, &v) in acc.iter_mut().zip(w) {
-                *s = s.wrapping_add(v as i32 * c as i32);
-            }
-        }
-        for (o, &l) in out.iter_mut().zip(&acc) {
-            *o = amr_wb_round(l.wrapping_shl(1));
-        }
+        // round(2l) = clamp16((2l + 2^15) >> 16) = clamp16((l + 2^14) >> 15), |l| < 2^30
+        crate::simd::fir32::<L_SUBFR16K, 15>(x, &fir32, out);
         return;
     }
     for (n, o) in out.iter_mut().enumerate() {
@@ -470,6 +461,28 @@ fn fir31(x: &[i16; L_FIR + L_SUBFR16K + 1], fir: &[i16; L_FIR + 1], out: &mut [i
             .zip(fir)
             .fold(0, |l, (&a, &c)| mac_16by16_to_int32(l, a, c));
         *o = amr_wb_round(l);
+    }
+}
+
+/// The 32-tap FIRs' fast path (`crate::simd::fir32` dispatches; this is its portable body
+/// and oracle): out[n] = clamp16((Σ_{k<32} c[k]·x[n + k] + 2^(SH-1)) >> SH) with wrapping
+/// sums, exact while the sums stay below 2^30 in magnitude (`fir31`: round(2l), SH = 15;
+/// `pred_lt4`: round(4l), SH = 14). Transposed: the outputs in lanes, one pass per tap.
+#[inline(always)]
+pub(crate) fn fir32_portable<const NO: usize, const SH: i32>(
+    x: &[i16],
+    c: &[i16; L_FIR + 2],
+    out: &mut [i16; NO],
+) {
+    let mut acc = [0i32; NO];
+    for (k, &c) in c.iter().enumerate() {
+        let w: &[i16; NO] = x[k..k + NO].try_into().unwrap();
+        for (s, &v) in acc.iter_mut().zip(w) {
+            *s = s.wrapping_add(v as i32 * c as i32);
+        }
+    }
+    for (o, &l) in out.iter_mut().zip(&acc) {
+        *o = (l.wrapping_add(1 << (SH - 1)) >> SH).clamp(-32768, 32767) as i16;
     }
 }
 
@@ -539,6 +552,54 @@ fn noise_block_is_the_generator() {
     }
 }
 
+/// `simd::fir32` (the AVX2 body where available) against its portable body on inputs up to
+/// the fast path's bound `2·max|x|·Σ|c| < 2^31` (full-range taps, then x scaled to it).
+#[cfg(test)]
+#[test]
+fn fir32_matches_portable() {
+    let mut r = crate::testutil::Rng::new(8);
+    for k in 0..20_000 {
+        let c: [i16; L_FIR + 2] = std::array::from_fn(|i| match (k % 4, i) {
+            (_, 31) => 0,
+            (0, _) => [i16::MIN, i16::MAX][(r.u64() & 1) as usize],
+            _ => r.i16() >> (r.u64() % 8),
+        });
+        let abs_sum: i64 = c.iter().map(|&v| (v as i64).abs()).sum();
+        let lim = (((1i64 << 30) - 1) / abs_sum.max(1)).min(32768) as i32;
+        // k % 3 == 0: x[n + k] = ±lim with c[k]'s sign, so the sums reach the bound (the
+        // rounding's saturation edge); else random signs, then scaled random values
+        let s = if r.u64() & 1 == 0 { 1 } else { -1 };
+        let x: [i16; L_FIR + L_SUBFR16K + 1] = std::array::from_fn(|i| match k % 3 {
+            0 => (s * (lim - 1) * if c[i % 32] < 0 { -1 } else { 1 }) as i16,
+            1 => [-lim, lim - 1][(r.u64() & 1) as usize] as i16,
+            _ => (r.i16() as i32 * lim / 32768) as i16,
+        });
+        let max = x.iter().map(|&v| (v as i64).abs()).max().unwrap();
+        assert!(
+            2 * max * abs_sum < 1 << 31,
+            "case {k}: outside the fast path"
+        );
+        let (mut a, mut b) = ([0i16; L_SUBFR16K], [0i16; L_SUBFR16K]);
+        crate::simd::fir32::<L_SUBFR16K, 15>(&x, &c, &mut a);
+        fir32_portable::<L_SUBFR16K, 15>(&x, &c, &mut b);
+        let want: [i16; L_SUBFR16K] = std::array::from_fn(|n| {
+            let l = (0..32).fold(0i32, |s, k| s + c[k] as i32 * x[n + k] as i32);
+            amr_wb_round(l.wrapping_shl(1))
+        });
+        assert_eq!(b, want, "case {k}: the portable rounding");
+        // pred_lt4's instantiations: 16 and 32 outputs, round(4l) (sums below 2^30 here too)
+        let (mut a16, mut b16) = ([0i16; 16], [0i16; 16]);
+        crate::simd::fir32::<16, 14>(&x[k % 64..], &c, &mut a16);
+        fir32_portable::<16, 14>(&x[k % 64..], &c, &mut b16);
+        assert_eq!(a16, b16, "case {k}: 16 outputs");
+        let (mut a32, mut b32) = ([0i16; 32], [0i16; 32]);
+        crate::simd::fir32::<32, 14>(&x[k % 48..], &c, &mut a32);
+        fir32_portable::<32, 14>(&x[k % 48..], &c, &mut b32);
+        assert_eq!(a32, b32, "case {k}: 32 outputs");
+        assert_eq!(a, b, "case {k}");
+    }
+}
+
 /// The high-band gain's energy and neighbour correlation of `synth`: the C's chains
 /// `L_mac(1, s[0], s[0])`, then per i >= 1 `L_mac(l, s[i], s[i])` and `L_mac(l2, s[i], s[i-1])`
 /// (from 1). The energy's terms are >= 0: it is min(1 + Σ 2·s², MAX_32). Below MAX_32 no
@@ -601,9 +662,9 @@ pub(crate) fn synthesis_amr_wb(
     let mut hf = [0i16; L_SUBFR16K];
     let mut synth400 = [0i16; L_SUBFR];
     lf_synthesis(aq, exc, q_new, &mut synth, &mut synth400, st);
-    crate::stages::mark(crate::stages::LF);
+    crate::stages::mark(crate::stages::D_LF);
     oversamp_12k8_to_16k(&synth, synth16k, &mut st.mem_oversamp);
-    crate::stages::mark(crate::stages::OVERSAMP);
+    crate::stages::mark(crate::stages::D_OVERSAMP);
 
     // high band: white noise scaled to the excitation energy
     noise_block(&mut hf, &mut st.seed2);
@@ -662,7 +723,7 @@ pub(crate) fn synthesis_amr_wb(
         }
     }
 
-    crate::stages::mark(crate::stages::HF_GAIN);
+    crate::stages::mark(crate::stages::D_HF_GAIN);
     let mut ap = [0i16; M16K + 1];
     if nb_bits <= NBBITS_7K && new_dtx_state == SPEECH {
         let mut hf_a = [0i16; M16K + 1];
@@ -674,7 +735,7 @@ pub(crate) fn synthesis_amr_wb(
         weight_amrwb_lpc(&aq[..M + 1], &mut ap[..M + 1], 19661);
         wb_syn_filt(&ap[..M + 1], &mut hf, &mut st.mem_syn_hf[M16K - M..]);
     }
-    crate::stages::mark(crate::stages::HF_SYN);
+    crate::stages::mark(crate::stages::D_HF_SYN);
     band_pass_6k_7k(&mut hf, &mut st.mem_hf);
     if nb_bits >= NBBITS_24K {
         low_pass_filt_7k(&mut hf, &mut st.mem_hf3);
@@ -682,5 +743,5 @@ pub(crate) fn synthesis_amr_wb(
     for (s, &h) in synth16k[..L_SUBFR16K].iter_mut().zip(&hf) {
         *s = add_int16(*s, h);
     }
-    crate::stages::mark(crate::stages::HF_FIR);
+    crate::stages::mark(crate::stages::D_HF_FIR);
 }

@@ -15,7 +15,7 @@ exe=$(cargo test -q --release -p "$crate" --lib --no-run --message-format=json 2
 [ -x "$exe" ] || { echo "asm: could not build the lib tests" >&2; exit 1; }
 out=target/asm.s
 objdump -d --no-show-raw-insn -C "$exe" |
-    awk -v re="$1" '/^[0-9a-f]+ <.*>:$/ { p = ($0 ~ re); if (p) n++ } p && n == 1' > "$out"
+    RE=$1 awk '/^[0-9a-f]+ <.*>:$/ { p = ($0 ~ ENVIRON["RE"]); if (p) n++ } p && n == 1' > "$out"
 [ -s "$out" ] || { echo "asm: no symbol matches '$1'" >&2; exit 1; }
 head -1 "$out"
 echo "$(grep -c $'^ *[0-9a-f]*:\t' "$out") instructions, $(grep -c '(%rsp' "$out") stack refs; most frequent:"

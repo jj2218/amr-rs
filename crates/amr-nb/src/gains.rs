@@ -2,7 +2,6 @@
 //!
 //! Bit-exact ports of opencore-amr 0.1.6 (Apache-2.0): `common/src/{gc_pred,gmed_n}.cpp` and
 //! `dec/src/{d_gain_p,d_gain_c,dec_gain,ec_gains,c_g_aver,ex_ctrl,bgnscd}.cpp`.
-#![allow(dead_code)] // integrated into the decoder later
 #![allow(clippy::needless_range_loop)] // keep the C loop/index structure
 
 use crate::basic_op::{
@@ -767,4 +766,4 @@ pub(crate) fn bgn_scd(
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c;
+mod vs_ref;

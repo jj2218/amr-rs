@@ -6,7 +6,7 @@ use crate::bits::Bits;
 use crate::cnst::*;
 use crate::dtx::{DtxDecState, SPEECH};
 use crate::excitation::*;
-use crate::gain::{GainMem, PBUF2, dec_gain2_amr_wb, dec_gain2_amr_wb_init};
+use crate::gains::{GainMem, PBUF2, dec_gain2_amr_wb, dec_gain2_amr_wb_init};
 use crate::lpc::*;
 use crate::synthesis::{SynthState, synthesis_amr_wb};
 use crate::tables::*;
@@ -234,7 +234,7 @@ impl State {
         let stab_fac = shl_int16(20480i16.wrapping_sub(t), 1).max(0);
         let isf_tmp = self.isfold;
         self.isfold = isf;
-        crate::stages::mark(crate::stages::PARAMS);
+        crate::stages::mark(crate::stages::D_PARAMS);
 
         let mut t0_min = 0i16;
         let mut q_new = 0i16;
@@ -499,7 +499,7 @@ impl State {
             } else {
                 0
             };
-            crate::stages::mark(crate::stages::EXC);
+            crate::stages::mark(crate::stages::D_EXC);
             synthesis_amr_wb(
                 &aq[sf * (M + 1)..(sf + 1) * (M + 1)],
                 &mut sub_exc2,
@@ -669,6 +669,6 @@ impl Decoder {
             self.st.reset(true);
         }
         self.reset_flag_old = self.reset_flag;
-        crate::stages::mark(crate::stages::TAIL);
+        crate::stages::mark(crate::stages::D_TAIL);
     }
 }

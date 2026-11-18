@@ -2,7 +2,6 @@
 //! (`Pred_lt_3or6`) and anti-sparseness phase dispersion (`ph_disp`).
 //! Bit-exact ports of opencore-amr 0.1.6 (Apache-2.0) `dec/{d2_9pf,d2_11pf,d3_14pf,d4_17pf,
 //! d8_31pf,d1035pf,dec_lag3,dec_lag6,ph_disp}.cpp` and `common/pred_lt.cpp`.
-#![allow(dead_code)] // wired into the decoder later
 #![allow(unused_imports)] // re-exports used once the decoder lands
 
 mod codebook;

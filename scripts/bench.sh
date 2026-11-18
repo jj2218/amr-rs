@@ -10,6 +10,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 crate=${CRATE:-amr-nb}  # CRATE=amr-wb: the other codec
+# BENCH=all: every codec × side, its "all" line only: a sweep's before/after (run on each tree).
+if [ "${BENCH:-}" = all ]; then
+    [ -z "${AB:-}" ] || { echo "bench: BENCH=all doesn't take AB= (run it on each tree)" >&2; exit 1; }
+    for c in amr-nb amr-wb; do for b in dec enc; do
+        printf '%-6s %s %s\n' "$c" "$b" "$(env -u BENCH_MODE CRATE=$c BENCH=$b bash "$0" | grep '^all ' || echo failed)"
+    done; done
+    exit
+fi
 # BENCH=stages: the encoder's and decoder's µs per frame per stage (`--cfg codec_stages` timers,
 # mean of all reps, timer overhead included): time attribution, as `perf` is unavailable.
 if [ "${BENCH:-}" = stages ]; then
@@ -87,7 +95,7 @@ if [ -n "${AB:-}" ]; then
     fi
     for r in 1 2 3; do for v in A B; do
         exe=$a; [ $v = B ] && exe=$b
-        BENCH=${BENCH:-enc} taskset -c "${BENCH_CPU:-2}" "$exe" | { grep -E "^${BENCH_MODE:-all} " || { echo "bench: no '${BENCH_MODE:-all}' line (modes: 475 515 59 67 74 795 102 122 all)" >&2; exit 1; }; } |
+        BENCH=${BENCH:-enc} taskset -c "${BENCH_CPU:-2}" "$exe" | { grep -E "^${BENCH_MODE:-all} " || { echo "bench: no '${BENCH_MODE:-all}' line" >&2; exit 1; }; } |
             awk -v v=$v '{printf "%s rust %s  c %s  %s\n", v, $2, $3, $4}'
     done; done
     exit

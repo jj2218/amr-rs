@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "amr-wb"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "opencore-sys",
  "ref26173-sys",

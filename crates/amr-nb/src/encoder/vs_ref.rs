@@ -1,4 +1,6 @@
-//! Differential tests of the encoder modules against the C oracle (opencore-amr 0.1.6).
+//! Differential tests of the encoder modules against the TS 26.073 reference (`ref26073-sys`,
+//! in opencore's function shapes: `refc`); opencore where a test says so, and as
+//! `kernel_timing`'s speed baseline.
 #![allow(unsafe_code)]
 
 use crate::basic_op::Flag;
@@ -3613,7 +3615,7 @@ mod pre_process {
     }
 
     #[test]
-    fn pre_process_vs_c() {
+    fn pre_process_vs_ref() {
         let mut g = Rng::new(77);
         let mut trunc = 0;
         for seq in 0..N / 50 {

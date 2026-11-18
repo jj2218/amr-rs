@@ -151,7 +151,7 @@ fn post_process_exact(st: &mut PostProcessState, signal: &mut [i16], lg: usize, 
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     use super::*;
     use crate::post::test_gen::signal;
     use crate::testutil::Rng;
@@ -189,7 +189,7 @@ mod vs_c {
     /// random amplitude. Classes counted: the fast path, its fallback (some y outside
     /// [-2^28, 2^28)), and fast calls with a full-scale output (+ and -).
     #[test]
-    fn post_process_vs_c() {
+    fn post_process_vs_ref() {
         let mut g = Rng::new(40);
         let (mut fast, mut exact, mut sat_hi, mut sat_lo) = (0, 0, 0, 0);
         for seq in 0..20 {
@@ -250,7 +250,7 @@ mod vs_c {
     /// u2 = 0, u1 solved for y = (u1 * a1) >> 15): round's overflow below 2^27 (16y + 0x8000
     /// past MAX_32 without 16y saturating), 16y's saturation at +-2^27, the fallback at +-2^28.
     #[test]
-    fn post_process_edges_vs_c() {
+    fn post_process_edges_vs_ref() {
         let mut n = 0;
         for edge in [(1 << 27) - 0x800, 1 << 27, -(1 << 27), 1 << 28, -(1 << 28)] {
             for d in -40i64..40 {

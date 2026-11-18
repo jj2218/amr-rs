@@ -6,7 +6,6 @@
 //! wrapping counts, matching the x86 behaviour of the C build. `ov` is opencore's
 //! `Flag *pOverflow`: operators only ever set it, never clear it.
 //! Derived from opencore-amr 0.1.6 (Apache-2.0).
-#![allow(dead_code)] // the full operator set is ported up front; not all are used yet
 
 /// opencore's `Flag`.
 pub type Flag = bool;
@@ -363,24 +362,6 @@ pub fn extract_h(l_var1: i32) -> i16 {
     (l_var1 >> 16) as i16
 }
 
-/// `extract_l`
-#[inline(always)]
-pub fn extract_l(l_var1: i32) -> i16 {
-    l_var1 as i16
-}
-
-/// `L_deposit_h`
-#[inline(always)]
-pub fn l_deposit_h(var1: i16) -> i32 {
-    (var1 as i32) << 16
-}
-
-/// `L_deposit_l`
-#[inline(always)]
-pub fn l_deposit_l(var1: i16) -> i32 {
-    var1 as i32
-}
-
 /// `L_Extract`: returns `(hi, lo)`.
 #[inline(always)]
 pub fn l_extract(l_var: i32, _ov: &mut Flag) -> (i16, i16) {
@@ -451,7 +432,7 @@ pub fn mac_32_16(l_var3: i32, hi: i16, lo: i16, var2: i16, ov: &mut Flag) -> i32
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod vs_c {
+mod vs_ref {
     //! Differential tests against the TS 26.073 reference (`ref26073-sys`); opencore only where
     //! the reference has no counterpart (`div_s` out of contract: the reference aborts).
     use super::*;
