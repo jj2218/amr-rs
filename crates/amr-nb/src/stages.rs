@@ -1,5 +1,5 @@
-//! Decoder and encoder stage timers for time attribution (callgrind counts instructions, `perf`
-//! is not available): `--cfg codec_stages` (`BENCH=stages just bench`) times the stretch since
+//! Decoder and encoder stage timers for time attribution per stage (`just perf` samples per
+//! function): `--cfg codec_stages` (`BENCH=stages just bench`) times the stretch since
 //! the previous mark and adds it to the stage being marked; otherwise every call is a no-op.
 //! Decoder stages are `D_*` (`NAMES_DEC`), encoder stages `E_*` (`NAMES_ENC`), in frame order.
 

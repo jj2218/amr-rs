@@ -20,22 +20,22 @@ ref26173-sys = { path = "../crates/ref26173-sys" }
 [workspace]
 
 [[bin]]
-name = "rfc4867"
-path = "fuzz_targets/rfc4867.rs"
+name = "nb_rfc4867"
+path = "fuzz_targets/nb_rfc4867.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "decode_vs_ref"
-path = "fuzz_targets/decode_vs_ref.rs"
+name = "nb_decode_vs_ref"
+path = "fuzz_targets/nb_decode_vs_ref.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "encode_vs_ref"
-path = "fuzz_targets/encode_vs_ref.rs"
+name = "nb_encode_vs_ref"
+path = "fuzz_targets/nb_encode_vs_ref.rs"
 test = false
 doc = false
 bench = false

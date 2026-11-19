@@ -3,6 +3,18 @@
 One section per release, newest first. The release commit in the repository carries the
 section of each crate it releases.
 
+## 0.4.2 (2026-11-19)
+Added
+- `Debug` for `Decoder` and `Encoder` (the encoder shows its `Dtx` setting; the state stays
+  opaque), so a struct holding a codec can derive `Debug`.
+- An example CLI, `examples/awb.rs`: `encode` raw 16 kHz PCM → `.awb` (any mode, optional
+  DTX) and `decode` `.awb` → PCM. Every 3GPP encoder input through it equals its decoder vector.
+
+Changed
+- Faster decoder on x86-64 CPUs with AVX2: about 2.5× the speed of opencore-amr (was 2.3×;
+  2.28–2.65× per mode). The output is unchanged (bit-exact on the 3GPP vectors and against
+  the 3GPP reference).
+
 ## 0.4.1 (2026-11-18)
 Changed
 - Faster decoder on x86-64 CPUs with AVX2: about 2.3× the speed of opencore-amr (was 2.2×).

@@ -13,7 +13,7 @@ const TX_FRAME_TYPE: i16 = 0x6b21;
 const RX_FRAME_TYPE: i16 = 0x6b20;
 
 /// One decoder input frame.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Frame {
     pub frame_type: RxFrameType,
     pub mode: Mode,
@@ -55,7 +55,7 @@ pub fn vectors_dir() -> PathBuf {
     }
 }
 
-fn read_i16(path: &Path) -> Vec<i16> {
+pub fn read_i16(path: &Path) -> Vec<i16> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     bytes
         .as_chunks::<2>()

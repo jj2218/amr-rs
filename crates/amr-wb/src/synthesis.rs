@@ -410,12 +410,30 @@ pub(crate) fn oversamp_12k8_to_16k(
     sig16k: &mut [i16],
     mem: &mut [i16; 2 * L_FILT],
 ) {
-    let mut signal = [0i16; 2 * L_FILT + L_SUBFR];
+    let mut signal = [0i16; OVERSAMP_IN];
     signal[..2 * L_FILT].copy_from_slice(mem);
     signal[2 * L_FILT..].copy_from_slice(sig12k8);
-    // Output j = 5m + p (m < 16) reads signal[1 + 4m + d + t] (t < 24, d = p - 1) for p > 0
-    // and copies signal[L_FILT + 4m] for p = 0. Polyphase: with the input split by index mod 4,
-    // each tap of a phase is one pass over 16 contiguous lanes (m). Plain sums, as the C.
+    let out: &mut [i16; L_SUBFR16K] = (&mut sig16k[..L_SUBFR16K]).try_into().unwrap();
+    crate::simd::oversamp_interpolate(&signal, out);
+    for m in 0..L_SUBFR16K / 5 {
+        out[5 * m] = signal[L_FILT + 4 * m];
+    }
+    mem.copy_from_slice(&signal[L_SUBFR..L_SUBFR + 2 * L_FILT]);
+}
+
+/// `oversamp_12k8_to_16k`'s input: the filter memory, then the subframe.
+pub(crate) const OVERSAMP_IN: usize = 2 * L_FILT + L_SUBFR;
+
+/// The interpolated outputs j = 5m + p (p = 1..=4, m < 16) of `oversamp_12k8_to_16k`
+/// (`crate::simd::oversamp_interpolate` dispatches; this is its portable body and oracle):
+/// `(shl(0x2000 + Σ_{t<24} FIR_UP[24(p-1) + t]·signal[4m + p + t], 2) >> 16`, plain sums as
+/// the C. Outputs 5m are left alone. Polyphase: with the input split by index mod 4, each tap
+/// of a phase is one pass over 16 contiguous lanes (m).
+#[inline(always)]
+pub(crate) fn oversamp_interpolate_portable(
+    signal: &[i16; OVERSAMP_IN],
+    sig16k: &mut [i16; L_SUBFR16K],
+) {
     const N: usize = L_SUBFR16K / 5;
     let ph: [[i16; 22]; 4] = std::array::from_fn(|r| std::array::from_fn(|q| signal[4 * q + r]));
     for p in 1..5 {
@@ -432,10 +450,6 @@ pub(crate) fn oversamp_12k8_to_16k(
             sig16k[5 * m + p] = (shl_int32(s, 2) >> 16) as i16;
         }
     }
-    for m in 0..N {
-        sig16k[5 * m] = signal[L_FILT + 4 * m];
-    }
-    mem.copy_from_slice(&signal[L_SUBFR..L_SUBFR + 2 * L_FILT]);
 }
 
 /// A 31-tap FIR over `x` (30 past samples, then 80 new) into `out`: TS 26.173's `L_mac`
@@ -550,6 +564,52 @@ fn noise_block_is_the_generator() {
         let want: [i16; L_SUBFR16K] = std::array::from_fn(|_| noise_gen_amrwb(&mut t) >> 3);
         assert_eq!((hf, s), (want, t), "seed {seed0}");
     }
+}
+
+/// `simd::oversamp_interpolate` (the AVX2 body where available) against its portable body:
+/// edge-biased samples, full scale with each phase's tap signs (the sums past the 2^29 clamp,
+/// both signs), quiet random; outputs 5m keep the caller's values.
+#[cfg(test)]
+#[test]
+fn oversamp_interpolate_matches_portable() {
+    let mut r = crate::testutil::Rng::new(9);
+    let mut clamped = [false; 2];
+    for k in 0..50_000 {
+        let p = 1 + k % 4; // the phase whose tap signs a full-scale input follows
+        let sign = if (k / 4) % 2 == 0 { 1 } else { -1 };
+        let signal: [i16; OVERSAMP_IN] = std::array::from_fn(|i| match k % 3 {
+            0 => r.i16(),
+            1 => {
+                // aligned for outputs m = 0, 6, 12 of phase p (4m = 0 mod 24)
+                let c = FIR_UP[24 * (p - 1) + (i + 24 - p) % 24];
+                if (c < 0) == (sign < 0) {
+                    i16::MAX
+                } else {
+                    i16::MIN
+                }
+            }
+            _ => r.i16() >> 6,
+        });
+        let fill: [i16; L_SUBFR16K] = std::array::from_fn(|_| r.i16());
+        let (mut a, mut b) = (fill, fill);
+        crate::simd::oversamp_interpolate(&signal, &mut a);
+        oversamp_interpolate_portable(&signal, &mut b);
+        assert_eq!(a, b, "case {k}");
+        // the raw sums past the clamp (not just ±32768 outputs, which near-limit sums give too)
+        for q in 1..5 {
+            for m in 0..16 {
+                let t = (0..24).fold(0x2000i64, |a, t| {
+                    a + FIR_UP[24 * (q - 1) + t] as i64 * signal[4 * m + q + t] as i64
+                });
+                clamped[0] |= t > (1 << 29) + (1 << 20);
+                clamped[1] |= t < -(1 << 29) - (1 << 20);
+            }
+        }
+    }
+    assert_eq!(
+        clamped, [true; 2],
+        "sums well past the 2^29 clamp, both signs"
+    );
 }
 
 /// `simd::fir32` (the AVX2 body where available) against its portable body on inputs up to

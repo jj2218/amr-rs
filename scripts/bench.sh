@@ -19,7 +19,7 @@ if [ "${BENCH:-}" = all ]; then
     exit
 fi
 # BENCH=stages: the encoder's and decoder's µs per frame per stage (`--cfg codec_stages` timers,
-# mean of all reps, timer overhead included): time attribution, as `perf` is unavailable.
+# mean of all reps, timer overhead included): time attribution per stage (`just perf`: per function).
 if [ "${BENCH:-}" = stages ]; then
     export RUSTFLAGS="${RUSTFLAGS:-} --cfg codec_stages" CARGO_TARGET_DIR="$PWD/target/stages"
     unset BENCH

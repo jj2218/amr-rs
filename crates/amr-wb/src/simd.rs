@@ -11,7 +11,7 @@
 //! `--cfg portable` compiles the dispatch out (`just test` runs both paths).
 //!
 //! Where LLVM's lanes stay poor, a kernel gets an AVX2 intrinsics body here (`dots4`, `norm_lags`,
-//! `fir32`, `phase_conv`), dispatched per call the same way; its `*_portable` body is the contract and oracle.
+//! `fir32`, `phase_conv`, `oversamp_interpolate`), dispatched per call the same way; its `*_portable` body is the contract and oracle.
 #![allow(unsafe_code)] // the approved scope: #[target_feature] copies and AVX2 kernels, below
 
 use crate::cnst::{L_FRAME, L_SUBFR, M, RxFrameType};
@@ -193,6 +193,13 @@ pub(crate) fn fir32<const NO: usize, const SH: i32>(
     crate::synthesis::fir32_portable::<NO, SH>(x, c, out)
 }
 
+/// Two taps as one `pmaddwd` operand: c0 in the low 16 bits, c1 in the high.
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+#[inline(always)]
+fn tap_pair(c0: i16, c1: i16) -> i32 {
+    (c0 as u16 as u32 | (c1 as u16 as u32) << 16) as i32
+}
+
 #[cfg(all(target_arch = "x86_64", not(portable)))]
 #[target_feature(enable = "avx2")]
 #[inline]
@@ -230,8 +237,7 @@ fn fir32_avx2<const NO: usize, const SH: i32>(
             _mm256_storeu_si256(q.add(1), _mm256_permute2x128_si256::<0x31>(lo, hi));
         }
         for m in 0..16 {
-            let pair = (c[2 * m] as u16 as u32 | (c[2 * m + 1] as u16 as u32) << 16) as i32;
-            let cp = _mm256_set1_epi32(pair);
+            let cp = _mm256_set1_epi32(tap_pair(c[2 * m], c[2 * m + 1]));
             for (q, a) in acc[..NO / 8].iter_mut().enumerate() {
                 let w = _mm256_loadu_si256(x2.as_ptr().add(8 * q + 2 * m) as *const __m256i);
                 *a = _mm256_add_epi32(*a, _mm256_madd_epi16(w, cp));
@@ -244,6 +250,83 @@ fn fir32_avx2<const NO: usize, const SH: i32>(
             let p = _mm256_packs_epi32(r(acc[2 * j]), r(acc[2 * j + 1]));
             let p = _mm256_permute4x64_epi64::<0xd8>(p);
             _mm256_storeu_si256(out.as_mut_ptr().add(16 * j) as *mut __m256i, p);
+        }
+    }
+}
+
+/// `synthesis::oversamp_interpolate_portable` (the contract and the oracle): the four
+/// interpolated phases of `oversamp_12k8_to_16k`. On AVX2 an unaligned load of 16 samples at
+/// offset b is the 8 sample pairs (s[b + 2k], s[b + 2k + 1]): output m of phase p at tap pair
+/// j reads the pair at 4m + p + 2j, so one load serves phase p (even pairs) and p + 2 (odd
+/// pairs) at the same j, and one `pmaddwd` with the two phases' tap pairs alternating does both
+/// (LLVM's lanes widened every tap to i32 and multiplied with `vpmulld`).
+#[inline(always)]
+pub(crate) fn oversamp_interpolate(
+    signal: &[i16; crate::synthesis::OVERSAMP_IN],
+    out: &mut [i16; crate::cnst::L_SUBFR16K],
+) {
+    #[cfg(all(target_arch = "x86_64", not(portable)))]
+    if avx2() {
+        // SAFETY: `oversamp_avx2` only requires AVX2, which `avx2()` just confirmed.
+        return unsafe { oversamp_avx2(signal, out) };
+    }
+    crate::synthesis::oversamp_interpolate_portable(signal, out)
+}
+
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+#[target_feature(enable = "avx2")]
+#[inline]
+fn oversamp_avx2(
+    signal: &[i16; crate::synthesis::OVERSAMP_IN],
+    out: &mut [i16; crate::cnst::L_SUBFR16K],
+) {
+    use crate::tables::FIR_UP;
+    use core::arch::x86_64::{
+        __m256i, _mm256_add_epi32, _mm256_loadu_si256, _mm256_madd_epi16, _mm256_max_epi32,
+        _mm256_min_epi32, _mm256_set1_epi32, _mm256_setr_epi32, _mm256_srai_epi32,
+        _mm256_storeu_si256,
+    };
+    // The 24 taps of phase p as 12 pairs (c[2j], c[2j + 1]) in one i32 each.
+    let pair = |p: usize, j: usize| {
+        tap_pair(
+            FIR_UP[24 * (p - 1) + 2 * j],
+            FIR_UP[24 * (p - 1) + 2 * j + 1],
+        )
+    };
+    // the furthest load: group 1 (p = 2), j = 11, block 3, 16 samples
+    const { assert!(2 + 2 * 11 + 16 * 3 + 16 <= crate::synthesis::OVERSAMP_IN) };
+    let mut res = [[0i32; 32]; 2];
+    // Group g: phases p = g + 1 (even lanes) and p + 2 (odd lanes); lane k of block q is
+    // output m = 4q + k/2. Loads of 16 i16 at g + 1 + 2j + 16q (j < 12, q < 4): at most
+    // 2 + 22 + 48 + 15 = 87 < OVERSAMP_IN = 88; stores of 8 i32 at res[g][8q], q < 4.
+    // SAFETY: every access is in bounds (above); AVX2 is enabled in this function.
+    unsafe {
+        for (g, res) in res.iter_mut().enumerate() {
+            let p = g + 1;
+            let mut acc = [_mm256_set1_epi32(0x2000); 4];
+            for j in 0..12 {
+                let (a, b) = (pair(p, j), pair(p + 2, j));
+                let c = _mm256_setr_epi32(a, b, a, b, a, b, a, b);
+                let base = signal.as_ptr().add(p + 2 * j);
+                for (q, acc) in acc.iter_mut().enumerate() {
+                    let w = _mm256_loadu_si256(base.add(16 * q) as *const __m256i);
+                    *acc = _mm256_add_epi32(*acc, _mm256_madd_epi16(w, c));
+                }
+            }
+            // shl_int32(s, 2) >> 16 = clamp(s, -2^29, 2^29 - 1) >> 14
+            let (lo, hi) = (
+                _mm256_set1_epi32(-(1 << 29)),
+                _mm256_set1_epi32((1 << 29) - 1),
+            );
+            for (q, acc) in acc.iter().enumerate() {
+                let v = _mm256_srai_epi32::<14>(_mm256_min_epi32(_mm256_max_epi32(*acc, lo), hi));
+                _mm256_storeu_si256(res.as_mut_ptr().add(8 * q) as *mut __m256i, v);
+            }
+        }
+    }
+    for (g, res) in res.iter().enumerate() {
+        for (k, &v) in res.iter().enumerate() {
+            out[5 * (k / 2) + g + 1 + 2 * (k % 2)] = v as i16;
         }
     }
 }

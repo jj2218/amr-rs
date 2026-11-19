@@ -9,12 +9,22 @@
 use amr_nb::rfc4867::{
     Error, Frame, Packing, STORAGE_MAGIC, read_rtp, read_storage, write_rtp, write_storage,
 };
+use amr_nb::{RxFrameType, SID_BITS};
 use libfuzzer_sys::fuzz_target;
 
 const PACKINGS: [Packing; 2] = [Packing::OctetAligned, Packing::BandwidthEfficient];
 
 fn check_frame(f: &Frame) {
     assert!(f.bits.iter().all(|&b| b == 0 || b == 1), "non-binary bit");
+}
+
+/// `f` as the writers send it: a SID_FIRST frame's comfort-noise bits zeroed.
+fn as_written(f: &Frame) -> Frame {
+    let mut f = f.clone();
+    if f.frame_type == RxFrameType::SidFirst {
+        f.bits[..SID_BITS].fill(0);
+    }
+    f
 }
 
 fn storage(file: &[u8]) {
@@ -40,7 +50,8 @@ fn storage(file: &[u8]) {
     // Each accepted frame took the same octets in the input as in the canonical output.
     assert!(out.len() <= file.len());
     let back: Result<Vec<_>, _> = read_storage(&out).unwrap().collect();
-    assert_eq!(back.unwrap(), ok, "storage round trip");
+    let sent: Vec<Frame> = ok.iter().map(as_written).collect();
+    assert_eq!(back.unwrap(), sent, "storage round trip");
 }
 
 fn rtp(payload: &[u8], packing: Packing) {
@@ -58,7 +69,7 @@ fn rtp(payload: &[u8], packing: Packing) {
         let (c, f) = read_rtp(&out, p).expect("written payload reads back");
         assert_eq!(
             (c, f.collect::<Vec<_>>()),
-            (cmr, frames.clone()),
+            (cmr, frames.iter().map(as_written).collect()),
             "{p:?} round trip"
         );
     }

@@ -131,15 +131,15 @@ Measured 2026-11-14 (2.25–2.27× over that day's runs). Portable build: 1.78×
 
 ## Fuzzing (`just fuzz [target] [seconds]`)
 cargo-fuzz (libFuzzer) on nightly-2026-11-01, debug assertions and overflow checks on, ASan on
-the Rust side. Corpus kept across runs in `.cache/fuzz/`. `rfc4867`: 2026-11-12, 600 s, corpus
+the Rust side. Corpus kept across runs in `.cache/fuzz/`. `nb_rfc4867`: 2026-11-12, 600 s, corpus
 continued. The codec targets diff against the TS 26.073 reference since 2026-11-14:
 600 s each, new corpora, then 1 h each.
 
 | target | checks | runs | cov | findings |
 |---|---|---:|---:|---|
-| `rfc4867` | `.amr`, RTP octet-aligned and bandwidth-efficient readers on arbitrary bytes: no panics, sane error order, accepted frames round-trip through both packings, canonical form never longer | 2,023,256 | 524 | none |
-| `decode_vs_ref` | Rust decoder vs the TS 26.073 reference `Speech_Decode_Frame` (`ref26073-sys`), PCM equal frame by frame: every RX frame type (bad, degraded, onset, SID first/update/bad, NO_DATA), any mode and bits; stops at a homing frame (the reference homes in `decoder.c`) | 452,074 (600 s); 30 min: 1; after the fix 1,175,462 (1 h): 0 | 2,162 | defect 12 (DTX mute clamp, inherited from opencore), fixed; both saved crash inputs replay clean |
-| `encode_vs_ref` | Rust encoder (DTX off / VAD1, per-frame mode from the input) vs the reference `Speech_Encode_Frame` + `sid_sync` on arbitrary PCM: TX type and serial bits equal | 550,312; 1,015,759 (1 h) | 5,518 | none |
+| `nb_rfc4867` | `.amr`, RTP octet-aligned and bandwidth-efficient readers on arbitrary bytes: no panics, sane error order, accepted frames round-trip through both packings, canonical form never longer | 2,023,256 | 524 | none |
+| `nb_decode_vs_ref` | Rust decoder vs the TS 26.073 reference `Speech_Decode_Frame` (`ref26073-sys`), PCM equal frame by frame: every RX frame type (bad, degraded, onset, SID first/update/bad, NO_DATA), any mode and bits; stops at a homing frame (the reference homes in `decoder.c`) | 452,074 (600 s); 30 min: 1; after the fix 1,175,462 (1 h): 0 | 2,162 | defect 12 (DTX mute clamp, inherited from opencore), fixed; both saved crash inputs replay clean |
+| `nb_encode_vs_ref` | Rust encoder (DTX off / VAD1, per-frame mode from the input) vs the reference `Speech_Encode_Frame` + `sid_sync` on arbitrary PCM: TX type and serial bits equal | 550,312; 1,015,759 (1 h) | 5,518 | none |
 
 ## Robustness: defects found in the legacy C (each absent in the Rust port)
 1. **No homing** (TS 26.073 encoder/decoder homing): raw opencore's decoder gets 1/191 on the
@@ -189,7 +189,7 @@ continued. The codec targets diff against the TS 26.073 reference since 2026-11-
 12. **DTX mute clamps the comfort-noise energy at 0**: entering DTX_MUTE (no SID update for
     50 frames), `dtx_dec` lowers `log_en` by 256 and opencore clamps it at 0 where TS 26.073
     saturates and lets it go negative; a low-energy SID followed by long silence then decodes
-    to different comfort noise. The Rust port had inherited the clamp; `decode_vs_ref` found
+    to different comfort noise. The Rust port had inherited the clamp; `nb_decode_vs_ref` found
     it after 30 min of fuzzing and it is fixed (test
     `decoder_matches_ref_through_dtx_mute`; the vectors never reach it).
 
@@ -273,11 +273,11 @@ interleaving/CRC/robust sorting): `amr-wb::rfc4867`. Oracles, all green:
   Frame types 10–13 (reserved, size unknown) end a file and discard an RTP packet.
 
 ### Fuzzing (`just fuzz wb_<target> [seconds]`)
-As amr-nb's (nightly-2026-11-01, ASan on the Rust side), 2026-11-15.
+As amr-nb's (nightly-2026-11-01, ASan on the Rust side), 2026-11-15; `wb_decode_vs_ref` re-run on main 2026-11-18.
 
 | target | checks | runs | cov | findings |
 |---|---|---:|---:|---|
-| `wb_decode_vs_ref` | Rust decoder vs the TS 26.173 reference's frame loop (`ref26173-sys`, homing included), PCM equal frame by frame: every RX frame type, mode and bits; NO_DATA only in DTX (the one difference, kept out; without that rule it fails in ~20 s) | 1,235,729 (1 h) | 2,120 | none |
+| `wb_decode_vs_ref` | Rust decoder vs the TS 26.173 reference's frame loop (`ref26173-sys`, homing included), PCM equal frame by frame: every RX frame type, mode and bits; NO_DATA only in DTX (the one difference, kept out; without that rule it fails in ~20 s) | 1,381,903 (1 h) | 2,792 | none |
 | `wb_rfc4867` | `.awb`, RTP octet-aligned and bandwidth-efficient readers on arbitrary bytes: no panics, accepted frames round-trip through both packings, canonical form never longer | 589,309 (120 s) | 494 | none |
 
 The fuzzer did not reach defect 11 (an extreme state: a history of maximal ISFs, then
@@ -290,19 +290,19 @@ decode, 14-bit output) on pre-parsed serial bits.
 
 | mode | Rust | C | speedup |
 |---|---:|---:|---:|
-| 6.60 | 16.0 | 34.4 | 2.16× |
-| 8.85 | 14.0 | 32.9 | 2.36× |
-| 12.65 | 13.6 | 30.4 | 2.24× |
-| 14.25 | 13.9 | 31.7 | 2.28× |
-| 15.85 | 13.8 | 31.9 | 2.31× |
-| 18.25 | 14.1 | 32.2 | 2.28× |
-| 19.85 | 14.2 | 32.5 | 2.29× |
-| 23.05 | 14.3 | 33.7 | 2.36× |
-| 23.85 | 15.0 | 37.1 | 2.47× |
-| **all** | **14.3** | **33.0** | **≈2.3×** |
+| 6.60 | 16.0 | 36.5 | 2.28× |
+| 8.85 | 13.5 | 34.4 | 2.56× |
+| 12.65 | 13.0 | 31.9 | 2.44× |
+| 14.25 | 13.0 | 32.3 | 2.49× |
+| 15.85 | 13.0 | 32.9 | 2.53× |
+| 18.25 | 13.4 | 33.9 | 2.52× |
+| 19.85 | 13.6 | 34.2 | 2.51× |
+| 23.05 | 13.7 | 35.6 | 2.59× |
+| 23.85 | 14.8 | 39.1 | 2.65× |
+| **all** | **13.8** | **34.5** | **≈2.5×** |
 
-Measured 2026-11-18 for 0.4.1 (earlier that day 2.16–2.21×; 2026-11-15: 2.0×). Portable build
-(`--cfg portable`, no AVX2): 1.78×. The frame decoder runs in an AVX2 copy of the same source when the CPU has AVX2, its FIRs on AVX2 kernels.
+Measured 2026-11-19 for 0.4.2 (0.4.1: 2.31×; 2026-11-15: 2.0×). Portable build
+(`--cfg portable`, no AVX2): 1.80×. The frame decoder runs in an AVX2 copy of the same source when the CPU has AVX2, its FIRs on AVX2 kernels.
 Exactness costs: the specification's saturating chains are serial where opencore's plain sums
 vectorise (the straight port with the corrections ran at 0.76×). The gains come from exact
 reformulations: bounds that prove a chain can't saturate (checked after a fast pass over the
@@ -387,11 +387,11 @@ macros and plain sums wrap where the specification saturates). The Rust encoder 
   every special case fails.
 
 ### Fuzzing (`just fuzz wb_encode_vs_ref [seconds]`)
-As the decoder's (nightly-2026-11-01, ASan on the Rust side), 2026-11-16.
+As the decoder's (nightly-2026-11-01, ASan on the Rust side), 2026-11-16; re-run on main 2026-11-18.
 
 | target | checks | runs | cov | findings |
 |---|---|---:|---:|---|
-| `wb_encode_vs_ref` | Rust encoder vs the TS 26.173 reference's frame loop (homing, `Write_serial` frame types) on arbitrary PCM, DTX on/off, any mode per frame (each frame repeated 1–8 times, scaled down 0–15 bits: DTX and SID frames reached; a DTX-only mutant fails in ~4 min) | 55,720 (30 min) | 2,895 | none |
+| `wb_encode_vs_ref` | Rust encoder vs the TS 26.173 reference's frame loop (homing, `Write_serial` frame types) on arbitrary PCM, DTX on/off, any mode per frame (each frame repeated 1–8 times, scaled down 0–15 bits: DTX and SID frames reached; a DTX-only mutant fails in ~4 min) | 362,342 (30 min) | 4,152 | none |
 
 ### Encoder speed (`CRATE=amr-wb BENCH=enc just bench`)
 µs per 20 ms frame, best of 15, on the single-mode vectors' input PCM (T00–T20, no DTX). Both

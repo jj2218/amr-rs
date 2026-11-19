@@ -868,3 +868,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod vs_ref;

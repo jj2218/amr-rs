@@ -782,6 +782,13 @@ pub struct Decoder {
     homed: bool,
 }
 
+/// `Decoder { .. }`: the state is the codec's internal memory.
+impl std::fmt::Debug for Decoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Decoder").finish_non_exhaustive()
+    }
+}
+
 impl Default for Decoder {
     fn default() -> Self {
         Self::new()
@@ -1028,7 +1035,7 @@ mod vs_ref {
     /// DTX muting with a low comfort-noise energy: a SID_UPDATE (random bits: log_en index
     /// <= 10 gives log_en <= 0), then NO_DATA past `DTX_MAX_EMPTY_THRESH` (mute, log_en -=
     /// 256: the reference goes negative, opencore and this port once clamped at 0). Found by
-    /// `decode_vs_ref` after 30 min.
+    /// `nb_decode_vs_ref` after 30 min.
     #[test]
     fn decoder_matches_ref_through_dtx_mute() {
         let _l = ref26073_sys::lock();

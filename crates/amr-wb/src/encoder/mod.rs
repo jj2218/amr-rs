@@ -100,7 +100,7 @@ pub enum Dtx {
 #[derive(Clone)]
 pub struct Encoder {
     st: Box<CoderState>,
-    dtx: bool,
+    dtx: Dtx,
     // `TX_State` (bits.c), without its `sid_handover_debt`: never raised in the reference
     sid_update_counter: i16,
     prev_ft: TxFrameType,
@@ -112,7 +112,7 @@ impl Encoder {
     pub fn new(dtx: Dtx) -> Self {
         Self {
             st: Box::new(CoderState::new()),
-            dtx: dtx == Dtx::On,
+            dtx,
             sid_update_counter: 3,
             prev_ft: TxFrameType::Speech,
         }
@@ -138,7 +138,9 @@ impl Encoder {
         let homing = pcm.iter().all(|&s| s == EHF_MASK);
         let signal = pcm.map(|s| s & !3);
         let mut prms = [0i16; MAX_SERIAL_SIZE];
-        let (used, n) = self.st.coder(mode as i16, &signal, &mut prms, self.dtx);
+        let (used, n) = self
+            .st
+            .coder(mode as i16, &signal, &mut prms, self.dtx == Dtx::On);
         if homing {
             self.st.reset(true);
         }
@@ -178,9 +180,33 @@ impl Encoder {
     }
 }
 
+/// The DTX setting; the rest is the codec's internal memory.
+impl std::fmt::Debug for Encoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Encoder")
+            .field("dtx", &self.dtx)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for Encoder {
     /// An encoder without DTX.
     fn default() -> Self {
         Self::new(Dtx::Off)
+    }
+}
+
+#[cfg(test)]
+mod debug {
+    use super::{Dtx, Encoder};
+    use crate::Decoder;
+
+    #[test]
+    fn debug_shows_the_dtx_setting_and_hides_the_state() {
+        assert_eq!(
+            format!("{:?}", Encoder::new(Dtx::On)),
+            "Encoder { dtx: On, .. }"
+        );
+        assert_eq!(format!("{:?}", Decoder::new()), "Decoder { .. }");
     }
 }

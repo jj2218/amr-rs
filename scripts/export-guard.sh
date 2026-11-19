@@ -27,7 +27,7 @@ out=$(
   scan 'PacketVideo|Organizational Partners' | sed 's/^/third-party copyright outside NOTICE: /'
   # Every `just <recipe>` the docs and sources mention exists.
   recipes=" $(just --summary) "
-  for r in $(tr '\n' '\0' <<<"$text" | xargs -0 grep -ohE '`just [a-z][a-z-]*' -- 2>/dev/null | awk '{print $2}' | sort -u); do
+  for r in $(tr '\n' '\0' <<<"$text" | xargs -0 grep -ohE '`just [a-z][a-z0-9-]*' -- 2>/dev/null | awk '{print $2}' | sort -u); do
     [[ "$recipes" == *" $r "* ]] || echo "mentions 'just $r', the justfile has no such recipe"
   done
 )

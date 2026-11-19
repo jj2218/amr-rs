@@ -11,7 +11,7 @@
 //! transmission with VAD option 1. A final partial frame is padded with silence. Decoding
 //! conceals frames of other codecs (types 9–11) like lost ones.
 
-use amr_nb::{Decoder, Dtx, Encoder, MAX_SERIAL_SIZE, Mode, RxFrameType, rfc4867};
+use amr_nb::{Decoder, Dtx, Encoder, L_FRAME, MAX_SERIAL_SIZE, Mode, RxFrameType, rfc4867};
 use std::error::Error;
 
 fn mode(rate: &str) -> Option<Mode> {
@@ -38,9 +38,9 @@ fn encode(input: &str, output: &str, mode: Mode, dtx: Dtx) -> Result<usize, Box<
         .collect();
     let mut enc = Encoder::new(dtx);
     let frames: Vec<rfc4867::Frame> = samples
-        .chunks(160)
+        .chunks(L_FRAME)
         .map(|chunk| {
-            let mut pcm = [0i16; 160];
+            let mut pcm = [0i16; L_FRAME];
             pcm[..chunk.len()].copy_from_slice(chunk);
             enc.encode(mode, &pcm)
         })
@@ -55,7 +55,7 @@ fn decode(input: &str, output: &str) -> Result<usize, Box<dyn Error>> {
     let mut out = Vec::new();
     let mut n = 0;
     for frame in rfc4867::read_storage(&file)? {
-        let mut pcm = [0i16; 160];
+        let mut pcm = [0i16; L_FRAME];
         match frame {
             Ok(f) => dec.decode(f.frame_type, f.mode, &f.bits, &mut pcm),
             // A frame of another codec (types 9..=11): conceal it, keep the timing.
@@ -74,8 +74,16 @@ fn decode(input: &str, output: &str) -> Result<usize, Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let frames = run(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    eprintln!("{frames} frames ({:.2} s)", frames as f64 * 0.02);
+    Ok(())
+}
+
+/// The command line without the program name; the number of frames written. Public for the
+/// conformance test, which runs every encoder vector through it (`tests/conformance.rs`).
+pub fn run(args: &[&str]) -> Result<usize, Box<dyn Error>> {
     let usage = "usage: amr encode <in.raw> <out.amr> [mode] [dtx] | amr decode <in.amr> <out.raw>";
-    let frames = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+    Ok(match *args {
         ["encode", input, output, ref rest @ ..] => {
             let (mut rate, mut dtx) = (Mode::MR122, Dtx::Off);
             for &opt in rest {
@@ -89,7 +97,5 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         ["decode", input, output] => decode(input, output)?,
         _ => return Err(usage.into()),
-    };
-    eprintln!("{frames} frames ({:.2} s)", frames as f64 * 0.02);
-    Ok(())
+    })
 }

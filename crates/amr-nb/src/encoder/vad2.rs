@@ -447,3 +447,6 @@ pub(crate) fn ltp_flag_update(st: &mut Vad2State, mode: CodecMode, ov: &mut Flag
     let ltmp = mpy_32_16(hi, lo, thresh, ov);
     st.ltp_flag = st.l_rmax > ltmp;
 }
+
+#[cfg(test)]
+pub(crate) mod vs_ref;

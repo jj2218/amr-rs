@@ -27,6 +27,17 @@ fn cache_dir() -> PathBuf {
     }
 }
 
+/// `tool` of the C compiler's binutils: its cross prefix when cross-compiling (the host's
+/// `objcopy` leaves an aarch64 archive unchanged, without an error), else plain `tool`.
+fn binutil(b: &cc::Build, tool: &str) -> String {
+    let cc = b.get_compiler();
+    let name = cc.path().file_name().unwrap().to_string_lossy();
+    match name.rfind('-') {
+        Some(i) => format!("{}{tool}", &name[..=i]),
+        None => tool.to_string(),
+    }
+}
+
 fn run(cmd: &mut Command) -> Vec<u8> {
     let out = cmd.output().unwrap_or_else(|e| panic!("{cmd:?}: {e}"));
     assert!(
@@ -82,17 +93,35 @@ fn main() {
         .define("i386", None)
         .define("WMOPS", "0")
         .define("VAD1", None);
+    let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     for f in list("SPC_OBJS", ".o")
         .iter()
         .chain(&list("FIPOP_SRCS", ".c"))
     {
-        b.file(src.join(format!("{f}.c")));
+        let path = src.join(format!("{f}.c"));
+        // `sp_enc.c` and `sp_dec.c` end in NUL padding: GCC warns about it on every build (in
+        // every cargo run's output), so those compile from a copy without the NULs. Headers
+        // still come from `src` (the include path).
+        let code = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        if code.contains(&0) {
+            let copy = out.join(format!("{f}.c"));
+            std::fs::write(
+                &copy,
+                code.iter()
+                    .filter(|&&c| c != 0)
+                    .copied()
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+            b.file(copy);
+        } else {
+            b.file(path);
+        }
     }
     b.compile("ref26073");
 
-    let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     let lib = out.join("libref26073.a");
-    let nm = run(Command::new("nm")
+    let nm = run(Command::new(binutil(&b, "nm"))
         .args(["--defined-only", "-g", "-P"])
         .arg(&lib));
     let mut map = String::new();
@@ -107,7 +136,7 @@ fn main() {
     }
     let syms = out.join("ref26073.syms");
     std::fs::write(&syms, map).unwrap();
-    run(Command::new("objcopy")
+    run(Command::new(binutil(&b, "objcopy"))
         .arg(format!("--redefine-syms={}", syms.display()))
         .arg(&lib));
 

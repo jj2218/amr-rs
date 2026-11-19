@@ -882,3 +882,6 @@ pub(crate) fn lsp(
     }
     written
 }
+
+#[cfg(test)]
+pub(crate) mod vs_ref;

@@ -28,6 +28,17 @@ fn cache_dir() -> PathBuf {
     }
 }
 
+/// `tool` of the C compiler's binutils: its cross prefix when cross-compiling (the host's
+/// `objcopy` leaves an aarch64 archive unchanged, without an error), else plain `tool`.
+fn binutil(b: &cc::Build, tool: &str) -> String {
+    let cc = b.get_compiler();
+    let name = cc.path().file_name().unwrap().to_string_lossy();
+    match name.rfind('-') {
+        Some(i) => format!("{}{tool}", &name[..=i]),
+        None => tool.to_string(),
+    }
+}
+
 fn run(cmd: &mut Command) -> Vec<u8> {
     let out = cmd.output().unwrap_or_else(|e| panic!("{cmd:?}: {e}"));
     assert!(
@@ -87,7 +98,7 @@ fn main() {
 
     let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     let lib = out.join("libref26173.a");
-    let nm = run(Command::new("nm")
+    let nm = run(Command::new(binutil(&b, "nm"))
         .args(["--defined-only", "-g", "-P"])
         .arg(&lib));
     let mut map = String::new();
@@ -102,7 +113,7 @@ fn main() {
     }
     let syms = out.join("ref26173.syms");
     std::fs::write(&syms, map).unwrap();
-    run(Command::new("objcopy")
+    run(Command::new(binutil(&b, "objcopy"))
         .arg(format!("--redefine-syms={}", syms.display()))
         .arg(&lib));
 

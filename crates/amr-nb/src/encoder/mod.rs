@@ -10,6 +10,8 @@
 pub(crate) mod codebook;
 mod dtx;
 pub(crate) mod gain_q;
+#[cfg(test)]
+mod kern;
 pub(crate) mod layout;
 pub(crate) mod lpc;
 pub(crate) mod pitch_cl;
@@ -18,7 +20,7 @@ mod vad;
 mod vad2;
 
 #[cfg(test)]
-mod vs_ref;
+pub(crate) mod vs_ref;
 
 use crate::basic_op::{Flag, add, extract_h, l_mult, l_shl, round, sub};
 use crate::cnst::{CodecMode, L_FRAME, L_INTERPOL, L_SUBFR, M, MP1, Mode, PIT_MAX};
@@ -825,6 +827,15 @@ impl Encoder {
     }
 }
 
+/// The DTX setting; the rest is the codec's internal memory.
+impl std::fmt::Debug for Encoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Encoder")
+            .field("dtx", &self.cod.dtx_mode)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for Encoder {
     /// An encoder without DTX.
     fn default() -> Self {
@@ -861,5 +872,20 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod debug {
+    use super::{Dtx, Encoder};
+    use crate::Decoder;
+
+    #[test]
+    fn debug_shows_the_dtx_setting_and_hides_the_state() {
+        assert_eq!(
+            format!("{:?}", Encoder::new(Dtx::Vad2)),
+            "Encoder { dtx: Vad2, .. }"
+        );
+        assert_eq!(format!("{:?}", Decoder::new()), "Decoder { .. }");
     }
 }

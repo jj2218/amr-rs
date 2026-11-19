@@ -346,3 +346,68 @@ fn c_encoder_oracle_sync() {
         |m, input| c_encode(false, &vec![m; input.len() / L_FRAME], input),
     );
 }
+
+#[path = "../examples/amr.rs"]
+#[allow(dead_code)] // its `main`: the test calls `run`, as the command line does
+mod amr;
+
+/// `examples/amr.rs` as a user runs it: every linear constant-mode encoder input, plain and
+/// DTX with VAD option 1 (the CLI's `dtx`), through `amr encode <in> <out.amr> <rate> [dtx]`
+/// and `amr decode`, equals the decoder vector of that `.COD`.
+#[test]
+fn example_cli_round_trips_to_the_decoder_vectors() {
+    const RATES: [&str; 8] = ["4.75", "5.15", "5.9", "6.7", "7.4", "7.95", "10.2", "12.2"];
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("amr-cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    let outs: std::collections::HashMap<String, Vec<i16>> = common::cases()
+        .into_iter()
+        .filter(|c| c.law == common::Law::Linear)
+        .map(|c| (c.name, c.expected))
+        .collect();
+    let cases: Vec<EncCase> = common::encoder_cases_where(|n| outs.contains_key(n))
+        .into_iter()
+        .filter(|c| c.vad < 2 && c.modes.iter().all(|&m| m == c.modes[0]))
+        .collect();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let failing: Vec<String> = std::thread::scope(|s| {
+        let jobs: Vec<_> = (0..threads)
+            .map(|k| {
+                let (cases, dir, outs) = (&cases, &dir, &outs);
+                s.spawn(move || {
+                    let mut failing = Vec::new();
+                    for (i, case) in cases.iter().enumerate().skip(k).step_by(threads) {
+                        let path = |ext: &str| dir.join(format!("{i}.{ext}")).display().to_string();
+                        let (inp, file, out) = (path("raw"), path("amr"), path("out"));
+                        let bytes: Vec<u8> =
+                            case.input.iter().flat_map(|v| v.to_le_bytes()).collect();
+                        std::fs::write(&inp, bytes).unwrap();
+                        let mut args = vec!["encode", &inp, &file, RATES[case.modes[0] as usize]];
+                        if case.vad == 1 {
+                            args.push("dtx");
+                        }
+                        amr::run(&args).unwrap();
+                        amr::run(&["decode", &file, &out]).unwrap();
+                        let got: Vec<i16> = std::fs::read(&out)
+                            .unwrap()
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|&b| i16::from_le_bytes(b))
+                            .collect();
+                        if got != outs[&case.name] {
+                            failing.push(case.name.clone());
+                        }
+                    }
+                    failing
+                })
+            })
+            .collect();
+        jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
+    });
+    println!(
+        "examples/amr.rs: {}/{} encoder inputs (plain and DTX) round-trip to their decoder vectors bit-exact",
+        cases.len() - failing.len(),
+        cases.len()
+    );
+    assert!(failing.is_empty(), "differ: {failing:?}");
+}

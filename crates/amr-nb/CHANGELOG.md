@@ -3,6 +3,11 @@
 One section per release, newest first. The release commit in the repository carries the
 section of each crate it releases.
 
+## 0.2.1 (2026-11-19)
+Added
+- `Debug` for `Decoder` and `Encoder` (the encoder shows its DTX setting; the state stays
+  opaque), so a struct holding a codec can derive `Debug`.
+
 ## 0.2.0 (2026-11-18)
 One API shape for `amr-nb` and `amr-wb`. Breaking changes, with the migration:
 - `Mode::MRDTX` is removed: it is not a bit rate. `Encoder::encode` no longer panics on it,

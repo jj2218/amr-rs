@@ -2,6 +2,7 @@
 //! proving the harness with the TS 26.173 reference and vo-amrwbenc.
 mod common;
 
+use amr_wb::L_FRAME;
 use common::{EncCase, encoder_cases};
 
 /// Encodes a case frame by frame with `enc(mode, dtx, frame, out) -> words`.
@@ -193,4 +194,71 @@ fn rust_encoder_on_vectors() {
     let mut failing = run("amr-wb encoder (Rust)", encode_rust, threads);
     failing.extend(bit_sync("amr-wb encoder (Rust)", encode_rust));
     assert!(failing.is_empty(), "{} failing: {failing:?}", failing.len());
+}
+
+#[path = "../examples/awb.rs"]
+#[allow(dead_code)] // its `main`: the test calls `run`, as the command line does
+mod awb;
+
+/// `examples/awb.rs` as a user runs it: every constant-mode encoder input, plain and DTX,
+/// through `awb encode <in> <out.awb> <rate> [dtx]` and `awb decode`, equals the decoder
+/// vector of that `.cod` (220 cases: T22 switches modes, which the CLI can't), plus the frame
+/// the CLI pads a final partial one into (the reference drops it).
+#[test]
+fn example_cli_round_trips_to_the_decoder_vectors() {
+    const RATES: [&str; 9] = [
+        "6.60", "8.85", "12.65", "14.25", "15.85", "18.25", "19.85", "23.05", "23.85",
+    ];
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("awb-cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    let t = common::vectors_dir().join("T");
+    let cases: Vec<_> = encoder_cases()
+        .into_iter()
+        .filter(|c| !c.sync && c.modes.len() == 1 && t.join(&c.name).with_extension("out").exists())
+        .collect();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let failing: Vec<String> = std::thread::scope(|s| {
+        let jobs: Vec<_> = (0..threads)
+            .map(|k| {
+                let (cases, dir, t) = (&cases, &dir, &t);
+                s.spawn(move || {
+                    let mut failing = Vec::new();
+                    for (i, case) in cases.iter().enumerate().skip(k).step_by(threads) {
+                        let path = |ext: &str| dir.join(format!("{i}.{ext}")).display().to_string();
+                        let (inp, file, out) = (path("raw"), path("awb"), path("out"));
+                        let bytes: Vec<u8> =
+                            case.input.iter().flat_map(|v| v.to_le_bytes()).collect();
+                        std::fs::write(&inp, bytes).unwrap();
+                        let mut args = vec!["encode", &inp, &file, RATES[case.modes[0] as usize]];
+                        if case.dtx {
+                            args.push("dtx");
+                        }
+                        awb::run(&args).unwrap();
+                        awb::run(&["decode", &file, &out]).unwrap();
+                        let got: Vec<i16> = std::fs::read(&out)
+                            .unwrap()
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|&b| i16::from_le_bytes(b))
+                            .collect();
+                        let want = common::read_i16(&t.join(&case.name).with_extension("out"));
+                        // the reference drops a final partial frame, the CLI pads it
+                        let padded = got.len() == case.input.len().div_ceil(L_FRAME) * L_FRAME;
+                        if !padded || got[..want.len()] != want[..] {
+                            failing.push(case.name.clone());
+                        }
+                    }
+                    failing
+                })
+            })
+            .collect();
+        jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
+    });
+    println!(
+        "examples/awb.rs: {}/{} encoder inputs (plain and DTX) round-trip to their decoder vectors bit-exact",
+        cases.len() - failing.len(),
+        cases.len()
+    );
+    assert!(failing.is_empty(), "differ: {failing:?}");
 }

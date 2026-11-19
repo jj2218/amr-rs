@@ -1372,3 +1372,6 @@ pub(crate) fn gain_quant(
         gc_pred_update(&mut st.gc_pred_st, qua_ener_mr122, qua_ener);
     }
 }
+
+#[cfg(test)]
+pub(crate) mod vs_ref;

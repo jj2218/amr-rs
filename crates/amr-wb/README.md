@@ -22,6 +22,9 @@ let frames: Vec<_> = samples.as_chunks::<L_FRAME>().0.iter()
 std::fs::write("out.awb", rfc4867::write_storage(&frames)?)?;
 ```
 
+A command-line example converts raw 16 kHz PCM to `.awb` and back:
+`cargo run --release --example awb -- encode speech.raw speech.awb 12.65`.
+
 ## Results
 Measured, with the recipe that reproduces each number, in
 [`docs/RESULTS.md`](https://github.com/jj2218/amr-rs/blob/main/docs/RESULTS.md#amr-wb-amr-wb-decoder)
@@ -42,8 +45,8 @@ Measured, with the recipe that reproduces each number, in
 - **`.awb` files**: every vector, packed per RFC 4867 and read back, decodes bit-exactly;
   the reader agrees with the TS 26.173 reference's on 20,000 random frames, and the writer's
   output for the encoder's frames (DTX, every mode) is byte-equal to the reference's.
-- **≈2.3× the speed of opencore-amr's C decoder** (-O3; 2.16–2.47× per mode) with runtime
-  AVX2 dispatch; the portable code 1.78×.
+- **≈2.5× the speed of opencore-amr's C decoder** (-O3; 2.28–2.65× per mode) with runtime
+  AVX2 dispatch; the portable code 1.80×.
 - **Fuzzed against the TS 26.173 reference**: the decoder on arbitrary frames (1 h), the
   encoder on arbitrary PCM (30 min, comfort noise included).
 - **Ten defects of opencore's decoder fixed** (saturation, rounding, shift counts, the
