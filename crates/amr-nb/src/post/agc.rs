@@ -165,7 +165,7 @@ pub(crate) fn agc2(sig_in: &[i16], sig_out: &mut [i16], l_trm: usize, ov: &mut F
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

@@ -12,16 +12,20 @@ check:
 rules:
     @bash scripts/export-guard.sh
 
+# The published codec crates present in this checkout, as `-p` arguments: recipe bodies stay the
+# same in every product (a product's justfile copies them; doctor compares them).
+export CODECS := `for c in amr-nb amr-wb lc3 vorbis-enc; do [ -d crates/$c ] && printf -- '-p %s ' $c; done; true`
+
 fmt-check:
     cargo fmt --all --check
-    cargo fmt --manifest-path fuzz/Cargo.toml --check
+    for m in fuzz/*/Cargo.toml; do cargo fmt --manifest-path "$m" --check; done
 
 lint: opencore vectors msrv
-    cargo clippy --workspace --all-targets --locked -- -D warnings
-    RUSTFLAGS="--cfg portable" CARGO_TARGET_DIR=target/portable cargo clippy -p amr-nb -p amr-wb --all-targets --locked -- -D warnings
-    cargo clippy --manifest-path fuzz/Cargo.toml --locked -- -D warnings
-    cargo clippy -q -p amr-nb -p amr-wb --lib --locked --target aarch64-unknown-linux-gnu -- -D warnings
-    RUSTDOCFLAGS="-D warnings" cargo doc -q -p amr-nb -p amr-wb --no-deps --locked
+    RUSTFLAGS="--cfg oracle" cargo clippy --workspace --all-targets --locked -- -D warnings
+    RUSTFLAGS="--cfg oracle --cfg portable" CARGO_TARGET_DIR=target/portable cargo clippy $CODECS --all-targets --locked -- -D warnings
+    for m in fuzz/*/Cargo.toml; do cargo clippy --manifest-path "$m" --locked -- -D warnings; done
+    cargo clippy -q $CODECS --lib --locked --target aarch64-unknown-linux-gnu -- -D warnings
+    RUSTDOCFLAGS="-D warnings" cargo doc -q $CODECS --no-deps --locked
 
 # The library builds with its minimum supported Rust (`rust-version` in Cargo.toml; installs it)
 msrv:
@@ -29,13 +33,13 @@ msrv:
     set -euo pipefail
     v=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
     rustup toolchain install "$v" --profile minimal --no-self-update >/dev/null 2>&1
-    CARGO_TARGET_DIR=target/msrv cargo "+$v" check -q -p amr-nb -p amr-wb --lib --locked
-    echo "msrv: amr-nb and amr-wb build with Rust $v"
+    CARGO_TARGET_DIR=target/msrv cargo "+$v" check -q $CODECS --lib --locked
+    echo "msrv: $(sed "s/-p //g" <<<"$CODECS")build with Rust $v"
 
-# Needs the C oracle (opencore-sys); fetched automatically, cached in .cache/. Runs the codec
-# tests three ways in parallel: runtime AVX2 dispatch (default), the portable path
-# (src/simd.rs), the vectors with the SSE2 kernels' array forms (the non-x86 bodies; their unit
-# oracles run in the other two). One line per run, a failing run's whole log (scripts/test.sh).
+# scripts/test.sh: the default build (AMR: runtime AVX2 dispatch; LC3: baseline SSE2 kernels) and
+# the portable path (--cfg portable: src/simd.rs compiled out); with AMR-NB also its vectors on
+# the SSE2 kernels' array forms (the non-x86 bodies). One line per run, a failing run's whole log.
+# The codec tests against their C oracles (fetched and cached in .cache/), in parallel
 test: opencore vectors
     @bash scripts/test.sh
 
@@ -47,32 +51,28 @@ test-aarch64: opencore vectors
 vectors:
     @bash scripts/vectors.sh
 
-# Codec conformance. AMR-NB vs the whole 3GPP TS 26.074 set (linear, A-law, µ-law; bit + frame sync): decoder (direct and via RFC 4867), encoder; pinned vector deviations are counted, not failed. AMR-WB decoder and encoder vs the TS 26.174 set (plus the C reference, opencore and vo-amrwbenc on it), and vs the TS 26.173 reference on stress streams (decoder 1600, encoder 64)
+# Codec conformance, one summary line per run: each codec crate present, bit-exact vs its oracle (its conformance tests name the set: AMR the 3GPP vectors and reference C, LC3 liblc3 on the SIG operating points, Vorbis aoTuV's Ogg streams; pinned deviations counted, not failed)
 conform: opencore vectors
-    @cargo test -q --release -p amr-nb --test conformance -- --nocapture 2>&1 | grep -E "bit-exact|failing|mismatch|panicked|error" | sed "s/^\.*//" || true
-    @cargo test -q --release -p amr-wb --test conformance -- --nocapture 2>&1 | grep -E "bit-exact|panicked|error" | sed "s/^\.*//" || true
-    @cargo test -q --release -p amr-wb --test enc_conformance -- --nocapture 2>&1 | grep -E "bit-exact|bit sync|panicked|error" | sed "s/^\.*//" || true
-    @WB_STRESS_STREAMS=200 cargo test -q --release -p amr-wb --test vs_ref -- --nocapture 2>&1 | grep -E "bit-exact|differs|panicked|error" | sed "s/^\.*//" || true
-    @cargo test -q --release -p amr-wb --test enc_vs_ref -- --nocapture 2>&1 | grep -E "bit-exact|differs|panicked|error" | sed "s/^\.*//" || true
+    @bash scripts/conform.sh
 
-# Decoder + encoder speed, Rust vs opencore C (-O3), pinned to one core; µs/frame per mode (BENCH=dec|enc; BENCH=all: both codecs × sides, the "all" lines (before/after a sweep); BENCH=stages: encoder and decoder µs/frame per stage, time attribution; BENCH=kern: ns/call per kernel, KERN=<substring> filters; AB=<ref>: ref vs working tree (B=<ref>: vs that ref; 3 reps per run), BENCH_MODE=<mode>: one mode only (each: per-mode table); with kern: min of 3 + ratio)
+# Decoder + encoder speed, Rust vs the legacy C (AMR: opencore -O3; LC3: liblc3 as distributions build it, -O3 -ffast-math, and strict; Vorbis: encoder only, aoTuV-Lancer, strict aoTuV and xiph's libvorbis), pinned to one core; µs/frame per mode (CRATE=<codec>, default the first present; BENCH=dec|enc; BENCH=all: every codec × side, the "all" lines (before/after a sweep); BENCH=stages: encoder and decoder µs/frame per stage, time attribution; BENCH=kern: ns/call per kernel, KERN=<substring> filters; AB=<ref>: ref vs working tree (B=<ref>: vs that ref; 3 reps per run), BENCH_MODE=<mode>: one mode only (each: per-mode table); with kern: min of 3 + ratio)
 bench: opencore vectors
     @bash scripts/bench.sh
 
-# Disassemble one function (count, top instructions, listing in target/asm.s), e.g. 'cor_h_tm.*avx2_copy'
+# Disassemble one function (count, top instructions, listing in target/asm.s), e.g. 'ltpf.*dot16' (an AMR AVX2 copy: 'cor_h_tm.*avx2_copy')
 [positional-arguments]
 asm symbol:
     @bash scripts/asm.sh "$1"
 
-# Rank the Rust codec's functions by sampled cycles (perf on the shipped build, inline frames resolved; AVX2 dispatch and portable; CRATE=amr-wb, BENCH=dec|enc|all, BENCH_MODE=<mode>, TOP=<n>)
+# Rank the Rust codec's functions by sampled cycles (perf on the shipped build, inline frames resolved; the default and the portable build; CRATE=<codec>, BENCH=dec|enc|all, BENCH_MODE=<mode>, TOP=<n>)
 perf: opencore vectors
     @bash scripts/perf.sh
 
-# Rank the Rust codec's functions by self cost (callgrind, no-inline copy; CRATE=amr-wb, BENCH=dec|enc, BENCH_MODE=<mode>: one mode)
+# Rank the Rust codec's functions by self cost (callgrind, no-inline copy; CRATE=<codec>, BENCH=dec|enc, BENCH_MODE=<mode>: one mode)
 profile: opencore vectors
     @bash scripts/profile.sh
 
-# Fuzz (nightly + cargo-fuzz, installed on first use): per codec (nb_*, wb_*) the rfc4867 readers, the decoder and the encoder vs the 3GPP reference C
+# Fuzz (nightly + cargo-fuzz, installed on first use; fuzz/<product>/), each codec vs its C oracle: AMR (nb_*, wb_*) the rfc4867 readers, the decoder and the encoder vs the 3GPP reference C; lc3_decode_vs_c, lc3_encode_vs_c: the LC3 decoder and encoder vs liblc3; lc3_api: any configuration, PCM and bytes, no panic; vorbis_encode_vs_c: the Vorbis encoder vs aoTuV; vorbis_encode_api: any f32 and configuration, no panic, lewton decodes
 [positional-arguments]
 fuzz target="all" seconds="60": vectors
     @bash scripts/fuzz.sh "$1" "$2"

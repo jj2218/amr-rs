@@ -926,7 +926,7 @@ pub(crate) static HP_GAIN: [i16; 16] = [
 /// `AMR_WB_COMPRESSED` from `pvamrwbdecoder_api.h`.
 pub(crate) static AMR_WB_COMPRESSED: [i16; 10] = [132, 177, 253, 285, 317, 365, 397, 461, 477, 35];
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_c {
     use opencore_sys as _; // links the C oracle

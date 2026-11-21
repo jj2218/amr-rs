@@ -369,7 +369,7 @@ fn norm_lags_matches_portable() {
     assert!(depth[0] > 4000 && depth[1] > 4000, "{depth:?}");
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

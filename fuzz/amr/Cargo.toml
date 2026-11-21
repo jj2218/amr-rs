@@ -11,10 +11,10 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-amr-nb = { path = "../crates/amr-nb" }
-ref26073-sys = { path = "../crates/ref26073-sys" }
-amr-wb = { path = "../crates/amr-wb" }
-ref26173-sys = { path = "../crates/ref26173-sys" }
+amr-nb = { path = "../../crates/amr-nb" }
+ref26073-sys = { path = "../../crates/ref26073-sys" }
+amr-wb = { path = "../../crates/amr-wb" }
+ref26173-sys = { path = "../../crates/ref26173-sys" }
 
 # Its own workspace: kept out of the stable one (`just check`, CI).
 [workspace]

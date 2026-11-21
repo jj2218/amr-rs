@@ -892,7 +892,7 @@ impl Decoder {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod homing {
     use super::*;
@@ -969,7 +969,7 @@ mod homing {
 /// `decoder.c` drives it) on random frames: every RX frame type (bad and degraded speech, SID
 /// first/update/bad, NO_DATA: the concealment paths), random modes and bits, mode switches.
 /// Random bits are never a decoder homing frame, so the reference's homing logic is idle.
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

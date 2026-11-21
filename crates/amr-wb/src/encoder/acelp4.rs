@@ -98,9 +98,22 @@ pub(crate) fn acelp_4t64_fx_portable(
     for t in 0..NB_TRACK {
         let d: [i16; NB_POS] = std::array::from_fn(|n| dn2[t + STEP * n]);
         let mut rank = [0i16; NB_POS];
-        for n in 0..NB_POS {
+        if cfg!(all(target_arch = "x86_64", not(portable))) {
+            // with an AVX2 copy: LLVM's form of this (one 16-lane compare per n) is the faster
+            for n in 0..NB_POS {
+                for m in 0..NB_POS {
+                    rank[n] += (d[m] > d[n] || (d[m] == d[n] && m < n)) as i16;
+                }
+            }
+        } else {
+            // without (portable, aarch64) the above runs scalar: (dn2, earlier position) as one
+            // distinct key, one compare per pair in lanes over n (portable enc 1.084)
+            let key: [i32; NB_POS] =
+                std::array::from_fn(|n| ((d[n] as i32) << 4) | (15 - n as i32));
             for m in 0..NB_POS {
-                rank[n] += (d[m] > d[n] || (d[m] == d[n] && m < n)) as i16;
+                for n in 0..NB_POS {
+                    rank[n] += (key[m] > key[n]) as i16;
+                }
             }
         }
         for n in 0..NB_POS {
@@ -860,7 +873,7 @@ pub(crate) fn quant_6p_6n_2(pos: &[i16], n: i16) -> i32 {
     index + ((i & 3) << (6 * n - 4))
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

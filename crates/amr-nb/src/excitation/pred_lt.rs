@@ -164,7 +164,7 @@ pub(crate) fn block_portable(src: &[i16; BLOCK_IN], k: &[i16; 2 * L_INTER10]) ->
     acc
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::super::{L_INTERPOL, L_SUBFR, PIT_MAX};

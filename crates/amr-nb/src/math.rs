@@ -79,7 +79,7 @@ pub(crate) fn sqrt_l_exp(l_x: i32, ov: &mut Flag) -> (i32, i16) {
     (y, e)
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

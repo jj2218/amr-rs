@@ -2125,5 +2125,5 @@ pub(super) fn sharpen_from(v: &mut [i16], t0: i16, sharp: i16, ov: &mut Flag) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 pub(crate) mod vs_ref;

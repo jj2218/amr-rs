@@ -2,7 +2,7 @@
 # Rank the Rust codec's functions by self cost (callgrind instructions, one bench rep;
 # BENCH=dec or BENCH=enc profiles one side, BENCH_MODE=<mode> one mode, e.g. 102).
 # Fat LTO inlines nearly everything into Decoder::decode, so the ranking build is a copy of
-# the workspace with #[inline(never)] on every function of the crate (CRATE=, default amr-nb) (basic_op stays inlined, so
+# the workspace with #[inline(never)] on every function of the crate (CRATE=, default the first codec present) (basic_op stays inlined, so
 # operator cost lands on its caller). Instructions are a guide, not time: confirm with
 # `just bench`. Line detail: callgrind_annotate --auto=yes target/callgrind.out
 # Each line also counts the function's scalar `imul`s and vector multiplies (pmaddwd/pmul*):
@@ -10,7 +10,9 @@
 # vectorise (syn_filt, norm_corr, cor_h_x, ph_disp were found that way); `just asm` to look.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-crate=${CRATE:-amr-nb}  # CRATE=amr-wb: the other codec
+# the first codec crate present (a product export has a subset)
+first_codec() { for c in amr-nb amr-wb lc3 vorbis-enc; do [ -d crates/$c ] && { echo $c; return; }; done; }
+crate=${CRATE:-$(first_codec)}  # CRATE=<codec>: another one present
 mod=${crate//-/_}
 src=target/profile-src
 rm -rf "$src" && mkdir -p "$src"

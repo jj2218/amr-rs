@@ -254,7 +254,7 @@ pub(crate) use crate::tables::ISF_INIT; // `isf_init` from `voAMRWBEnc.c`, as th
 
 pub(crate) use crate::tables::HP_GAIN; // `HP_gain` from `voAMRWBEnc.c`, as the decoder's
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_c {
     use opencore_sys as _; // links the C oracle

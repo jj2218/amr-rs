@@ -404,7 +404,7 @@ fn level_calculation(
     extract_h(l_shl(l2, scale))
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

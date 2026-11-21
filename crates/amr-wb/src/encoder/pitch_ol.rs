@@ -161,7 +161,7 @@ pub(crate) fn med_olag(prev_ol_lag: i16, old_ol_lag: &mut [i16; 5]) -> i16 {
     median5(old_ol_lag, 2)
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

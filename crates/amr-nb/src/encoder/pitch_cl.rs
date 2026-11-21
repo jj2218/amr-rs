@@ -869,5 +869,5 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 pub(crate) mod vs_ref;

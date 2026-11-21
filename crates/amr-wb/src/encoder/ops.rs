@@ -80,7 +80,7 @@ pub(crate) fn log2(l_x: i32) -> (i16, i16) {
     (e, f)
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

@@ -14,17 +14,17 @@ scan() { tr '\n' '\0' <<<"$text" | xargs -0 grep -nE "$1" -- 2>/dev/null | head 
 
 out=$(
   # Development-only paths and downloads.
-  grep -E '^(CLAUDE\.md|\.claude/|\.devcontainer/|docs/(FLAGS|ideas|structure|porting)\.md|docs/spikes/|spikes/|ship/|\.cache/|fuzz/(artifacts|corpus)/|scripts/(doctor|ship|commit|pr)\.sh)' <<<"$files" \
+  grep -E '^(CLAUDE\.md|\.claude/|\.devcontainer/|docs/(FLAGS|ideas|structure|porting)\.md|docs/spikes/|spikes/|ship/|\.cache/|fuzz/([^/]+/)?(artifacts|corpus)/|scripts/(doctor|ship|commit|pr)\.sh)' <<<"$files" \
     | sed 's/^/development-only path: /' || true
   # Vectors, archives, C++ (opencore's sources are .cpp).
-  grep -iE '\.(inp|cod|out|zip|tar|gz|tgz|xz|cpp|cc)$' <<<"$files" | sed 's/^/vector, archive or C++ file: /' || true
-  # C files: only our own FFI shims, each saying so on its first line.
+  grep -iE '\.(inp|cod|out|zip|tar|gz|tgz|xz|cpp|cc|wav|pdf)$' <<<"$files" | sed 's/^/vector, audio item, archive, spec or C++ file: /' || true
+  # C files: only our own FFI shims and tools, each saying so on its first line.
   for f in $(grep -E '\.[ch]$' <<<"$files" || true); do
-    head -1 "$f" | grep -q 'Our own shim' || echo "C file that isn't one of our shims: $f"
+    head -1 "$f" | grep -qE 'Our own (shim|tool)' || echo "C file that isn't one of our shims or tools: $f"
   done
   scan 'CLAUDE\.md|\.claude/|docs/(FLAGS|ideas|structure|porting)\.md|spikes/|just doctor|doctor\.sh' \
     | sed 's/^/reference to an unexported file: /'
-  scan 'PacketVideo|Organizational Partners' | sed 's/^/third-party copyright outside NOTICE: /'
+  scan 'PacketVideo|Organizational Partners|Google LLC' | sed 's/^/third-party copyright outside NOTICE: /'
   # Every `just <recipe>` the docs and sources mention exists.
   recipes=" $(just --summary) "
   for r in $(tr '\n' '\0' <<<"$text" | xargs -0 grep -ohE '`just [a-z][a-z0-9-]*' -- 2>/dev/null | awk '{print $2}' | sort -u); do

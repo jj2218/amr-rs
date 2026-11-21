@@ -6,7 +6,9 @@
 # Portable path: RUSTFLAGS="--cfg portable". CRATE=<crate>: another codec (default amr-nb).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-crate=${CRATE:-amr-nb}  # CRATE=amr-wb: the other codec
+# the first codec crate present (a product export has a subset)
+first_codec() { for c in amr-nb amr-wb lc3 vorbis-enc; do [ -d crates/$c ] && { echo $c; return; }; done; }
+crate=${CRATE:-$(first_codec)}  # CRATE=<codec>: another one present
 case "${RUSTFLAGS:-}" in *portable*)
     export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/portable}" ;; esac
 [ $# -eq 1 ] || { echo "usage: just asm '<symbol regex>'" >&2; exit 1; }

@@ -3,6 +3,18 @@
 One section per release, newest first. The release commit in the repository carries the
 section of each crate it releases.
 
+## 0.4.3 (2026-11-21)
+Changed
+- Faster decoder with AVX2 (the synthesis history terms as `pmaddwd` pairs: ~7%) and faster
+  encoder without AVX2 (the 4-track codebook's rank count as one compare: ~8%); output
+  unchanged (bit-exact on the 3GPP vectors).
+
+Fixed
+- `cargo test` from the published crate: the tests against the C references (dev-only, not
+  published) are compiled out there, so the crate's own tests, doc tests included, pass
+  (0.4.2's failed to compile).
+- The README example compiles and runs (a doc test now); the crate docs have an example too.
+
 ## 0.4.2 (2026-11-19)
 Added
 - `Debug` for `Decoder` and `Encoder` (the encoder shows its `Dtx` setting; the state stays

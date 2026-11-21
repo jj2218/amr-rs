@@ -219,7 +219,7 @@ pub(crate) fn hp400_12k8(signal: &mut [i16], mem: &mut [i16; 6]) {
     *mem = [y2_hi, y2_lo, y1_hi, y1_lo, x0, x1];
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 pub(crate) mod vs_ref {
     use super::*;

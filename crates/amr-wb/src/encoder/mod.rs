@@ -11,7 +11,7 @@ mod bits;
 mod coder;
 mod dtx;
 mod filters;
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 mod kern;
 mod lpc;
 mod ops;

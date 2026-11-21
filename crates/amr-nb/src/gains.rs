@@ -764,6 +764,6 @@ pub(crate) fn bgn_scd(
     inbg_noise
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref;

@@ -45,7 +45,7 @@ pub(crate) fn preemphasis(
     *ov |= sat != 0;
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

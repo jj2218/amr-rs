@@ -677,7 +677,7 @@ mod tests {
 
 /// Against the TS 26.173 reference's storage reader (`Read_serial`, format 2 = MIME, as its
 /// `decoder -mime` reads `.awb` files), run on the same bytes through a C `FILE`.
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::tests::{all_kinds, as_written, storage};
@@ -796,7 +796,7 @@ mod vs_ref {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_c {
     use super::tests::storage;

@@ -883,5 +883,5 @@ pub(crate) fn lsp(
     written
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 pub(crate) mod vs_ref;

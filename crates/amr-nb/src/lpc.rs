@@ -514,7 +514,7 @@ pub(crate) fn lsp_avg(st: &mut LspAvgState, lsp: &[i16], ov: &mut Flag) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

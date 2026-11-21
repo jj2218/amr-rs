@@ -115,7 +115,7 @@ pub(crate) fn dec_lag6(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

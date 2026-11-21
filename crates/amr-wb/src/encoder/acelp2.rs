@@ -281,7 +281,7 @@ fn search_2t(
     Some((2 * kx, 2 * ky + 1))
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 pub(crate) mod vs_ref {
     use super::*;

@@ -44,7 +44,7 @@ impl Rng {
 }
 
 /// Runs `f` on the TS 26.173 reference holding its lock (its overflow flag is global).
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 pub fn with_ref<T>(f: impl FnOnce() -> T) -> T {
     let _l = ref26173_sys::lock();
     f()

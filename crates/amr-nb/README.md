@@ -7,20 +7,25 @@ bandwidth-efficient). Ported from opencore-amr 0.1.6.
 ```rust
 use amr_nb::{Decoder, Dtx, Encoder, Mode, rfc4867};
 
-// Encode: 160 samples of 8 kHz, 16-bit PCM per 20 ms frame.
-let mut enc = Encoder::new(Dtx::Off);
-let frames: Vec<rfc4867::Frame> = pcm
-    .chunks_exact(160)
-    .map(|chunk| enc.encode(Mode::MR122, chunk.try_into().unwrap()))
-    .collect();
-std::fs::write("speech.amr", rfc4867::write_storage(&frames)?)?;
+fn main() -> Result<(), rfc4867::Error> {
+    let pcm = vec![0i16; 8000]; // one second of 8 kHz, 16-bit PCM
 
-// Decode.
-let mut dec = Decoder::new();
-let mut out = [0i16; 160];
-for frame in rfc4867::read_storage(&std::fs::read("speech.amr")?)? {
-    let f = frame?; // examples/amr.rs conceals other codecs' frames instead
-    dec.decode(f.frame_type, f.mode, &f.bits, &mut out);
+    // Encode: 160 samples per 20 ms frame; the `.amr` file's bytes (`std::fs::write` them).
+    let mut enc = Encoder::new(Dtx::Off);
+    let frames: Vec<rfc4867::Frame> = pcm
+        .chunks_exact(160)
+        .map(|chunk| enc.encode(Mode::MR122, chunk.try_into().unwrap()))
+        .collect();
+    let amr = rfc4867::write_storage(&frames)?;
+
+    // Decode.
+    let mut dec = Decoder::new();
+    let mut out = [0i16; 160];
+    for frame in rfc4867::read_storage(&amr)? {
+        let f = frame?; // examples/amr.rs conceals other codecs' frames instead
+        dec.decode(f.frame_type, f.mode, &f.bits, &mut out);
+    }
+    Ok(())
 }
 ```
 

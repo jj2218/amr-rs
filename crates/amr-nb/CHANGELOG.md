@@ -3,6 +3,14 @@
 One section per release, newest first. The release commit in the repository carries the
 section of each crate it releases.
 
+## 0.2.2 (2026-11-21)
+Fixed
+- `cargo test` from the published crate: the tests against the C references (dev-only, not
+  published) are compiled out there, so the crate's own tests, doc tests included, pass
+  (0.2.1's failed to compile).
+- The README example compiles and runs (it is a doc test now); it encoded from and decoded to
+  undefined variables and files.
+
 ## 0.2.1 (2026-11-19)
 Added
 - `Debug` for `Decoder` and `Encoder` (the encoder shows its DTX setting; the state stays

@@ -151,7 +151,7 @@ pub(crate) fn post_filter(
     st.synth_buf.copy_within(L_FRAME..L_FRAME + M, 0);
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

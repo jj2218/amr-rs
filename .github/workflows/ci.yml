@@ -7,7 +7,7 @@ on:
 
 # The 3GPP server refuses GitHub's runners, so CI can't fetch the oracles: it checks what builds
 # without them (guard, format, the library on x86-64 and aarch64 and at its minimum Rust
-# version, docs, the package). The tests
+# version, docs, the package and its tests from the `.crate`). The tests
 # against the vectors and the reference C run locally: `just check`.
 jobs:
   check:
@@ -22,4 +22,4 @@ jobs:
       - run: RUSTFLAGS="--cfg portable" cargo clippy -p amr-nb -p amr-wb --lib --locked -- -D warnings
       - run: cargo clippy -p amr-nb -p amr-wb --lib --locked --target aarch64-unknown-linux-gnu -- -D warnings
       - run: RUSTDOCFLAGS="-D warnings" cargo doc -p amr-nb -p amr-wb --no-deps --locked
-      - run: cargo package -p amr-nb -p amr-wb --locked
+      - run: bash scripts/package-test.sh 

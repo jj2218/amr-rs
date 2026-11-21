@@ -594,7 +594,7 @@ pub(crate) fn qisf_ns(isf1: &[i16; M], isf_q: &mut [i16; M], indice: &mut [i16; 
     crate::lpc::disf_ns(indice, isf_q);
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;
@@ -766,7 +766,7 @@ mod vs_ref {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref_direct {
     use super::*;

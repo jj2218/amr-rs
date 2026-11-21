@@ -448,5 +448,5 @@ pub(crate) fn ltp_flag_update(st: &mut Vad2State, mode: CodecMode, ov: &mut Flag
     st.ltp_flag = st.l_rmax > ltmp;
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 pub(crate) mod vs_ref;

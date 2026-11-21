@@ -274,7 +274,7 @@ pub(crate) fn weight_ai(a: &[i16], fac: &[i16], a_exp: &mut [i16]) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

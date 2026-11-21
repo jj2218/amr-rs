@@ -69,3 +69,8 @@ pub use encoder::{Dtx, Encoder};
 
 #[cfg(test)]
 mod testutil;
+
+/// The README's example compiles and runs.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctest;

@@ -17,6 +17,8 @@
 use crate::cnst::{L_FRAME, L_SUBFR, M, RxFrameType};
 use crate::decoder::State;
 use crate::encoder::kernels as k;
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+use crate::synthesis::HIST_PAIRS;
 use crate::synthesis::L_FIR;
 
 /// Whether the AVX2 copies may run on this CPU.
@@ -191,6 +193,49 @@ pub(crate) fn fir32<const NO: usize, const SH: i32>(
         return unsafe { fir32_avx2::<NO, SH>(x, c, out) };
     }
     crate::synthesis::fir32_portable::<NO, SH>(x, c, out)
+}
+
+/// `synthesis::hist_terms_portable` (the contract and the oracle; only builds with the AVX2
+/// copy use this layout): the terms of the N outputs before a block of 8. On AVX2 one
+/// `pmaddwd` per history pair, the coefficient pairs of the 8 outputs against the broadcast
+/// (h[2p], h[2p + 1]) (LLVM's form of the i32 one-tap-per-pass body: `vpmulld`, dec 1.065).
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+#[inline(always)]
+pub(crate) fn hist_terms<const N: usize>(
+    acc: &mut [i32; 8],
+    c: &[[i16; 16]; HIST_PAIRS],
+    h: &[i16; N],
+) {
+    if avx2() {
+        // SAFETY: `hist_terms_avx2` only requires AVX2, which `avx2()` just confirmed.
+        return unsafe { hist_terms_avx2::<N>(acc, c, h) };
+    }
+    crate::synthesis::hist_terms_portable::<N>(acc, c, h)
+}
+
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+#[target_feature(enable = "avx2")]
+#[inline]
+fn hist_terms_avx2<const N: usize>(acc: &mut [i32; 8], c: &[[i16; 16]; HIST_PAIRS], h: &[i16; N]) {
+    use core::arch::x86_64::{
+        __m256i, _mm256_add_epi32, _mm256_loadu_si256, _mm256_madd_epi16, _mm256_set1_epi32,
+        _mm256_setzero_si256, _mm256_slli_epi32, _mm256_storeu_si256, _mm256_sub_epi32,
+    };
+    const { assert!(N.is_multiple_of(2)) };
+    let c = &c[..N / 2];
+    let mut t = _mm256_setzero_si256();
+    for (cp, hp) in c.iter().zip(h.as_chunks::<2>().0) {
+        // SAFETY: 16 i16 behind a reference; AVX2 is enabled in this function.
+        let cv = unsafe { _mm256_loadu_si256(cp.as_ptr() as *const __m256i) };
+        let hv = _mm256_set1_epi32(tap_pair(hp[0], hp[1]));
+        t = _mm256_add_epi32(t, _mm256_madd_epi16(cv, hv));
+    }
+    // SAFETY: `acc` holds 8 i32 (32 bytes), read and written whole.
+    unsafe {
+        let a = _mm256_loadu_si256(acc.as_ptr() as *const __m256i);
+        let r = _mm256_sub_epi32(a, _mm256_slli_epi32::<1>(t));
+        _mm256_storeu_si256(acc.as_mut_ptr() as *mut __m256i, r);
+    }
 }
 
 /// Two taps as one `pmaddwd` operand: c0 in the low 16 bits, c1 in the high.

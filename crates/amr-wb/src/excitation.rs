@@ -64,6 +64,10 @@ pub(crate) fn pred_lt4(buf: &mut [i16], pos: usize, t0: i16, frac: i16, l_subfr:
 /// then sum below 16384 in |c|, so they move the chain, and S beyond the prefix, by under
 /// 65536·16384 = 2^30: both stay at or beyond ±2^30 with the prefix's sign, where both forms
 /// give 32767 (S >= 2^30) or -32768 (S <= -2^30).
+#[allow(
+    dead_code,
+    reason = "evaluated by the `const _` below; Rust 1.88 still reports it unused"
+)]
 const CHAIN_IS_CLAMPED_SUM: () = {
     let mut r = 0;
     while r < 4 {

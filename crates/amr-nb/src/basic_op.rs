@@ -430,7 +430,7 @@ pub fn mac_32_16(l_var3: i32, hi: i16, lo: i16, var2: i16, ov: &mut Flag) -> i32
     l_mac(acc, p, 1, ov)
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     //! Differential tests against the TS 26.073 reference (`ref26073-sys`); opencore only where

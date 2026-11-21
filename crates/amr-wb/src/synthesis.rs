@@ -128,8 +128,60 @@ fn max_abs(v: &[i16]) -> i64 {
 /// Outputs per block of the fast synthesis filters.
 const B: usize = 8;
 
+// The terms of the N outputs before a block: per build, the layout its kernel runs fastest
+// on. With the AVX2 copy, history pairs for `simd::hist_terms`' `pmaddwd`s (dec 1.073);
+// without (portable, aarch64), doubled i32 coefficients, one tap per pass of i32 lanes
+// (the pair layout was 0.975–0.985 there).
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+use crate::simd::hist_terms;
+
+/// The coefficients of the N outputs before a block (N even), as history pairs: `c[p][2i + e]`
+/// is the coefficient of y[n0 - N + 2p + e] in output n0 + i, 0 where that sample is not
+/// among output i's N predecessors outside the block (`simd::hist_terms`' layout).
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+#[inline(always)]
+fn hist_coefs<const N: usize>(a: &[i16]) -> [[i16; 2 * B]; HIST_PAIRS] {
+    const { assert!(N.is_multiple_of(2) && N <= 2 * HIST_PAIRS) };
+    std::array::from_fn(|p| {
+        std::array::from_fn(|k| {
+            let (i, j) = (k / 2, 2 * p + k % 2);
+            if j < N && j >= i { a[N + i - j] } else { 0 }
+        })
+    })
+}
+
+/// `hist_coefs`' capacity: the pairs of the highest order (M16K); lower orders use a prefix.
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+pub(crate) const HIST_PAIRS: usize = M16K / 2;
+
+/// `simd::hist_terms`' contract and non-AVX2 body: `acc[i] -= 2·Σ_j c(j, i)·h[j]` over the
+/// pairs of `c` (`hist_coefs`), wrapping (`pmaddwd`'s one overflow, 2·(-32768)², wraps as the
+/// wrapping sums do), doubled once. The callers' bounds keep every partial sum in range, so
+/// wrapping gives the true sums.
+#[cfg(all(target_arch = "x86_64", not(portable)))]
+#[inline(always)]
+pub(crate) fn hist_terms_portable<const N: usize>(
+    acc: &mut [i32; B],
+    c: &[[i16; 2 * B]; HIST_PAIRS],
+    h: &[i16; N],
+) {
+    const { assert!(N.is_multiple_of(2) && N <= 2 * HIST_PAIRS) };
+    let mut t = [0i32; B];
+    for (cp, hp) in c[..N / 2].iter().zip(h.as_chunks::<2>().0) {
+        for e in 0..2 {
+            for i in 0..B {
+                t[i] = t[i].wrapping_add((cp[2 * i + e] as i32).wrapping_mul(hp[e] as i32));
+            }
+        }
+    }
+    for (s, t) in acc.iter_mut().zip(t) {
+        *s = s.wrapping_sub(t.wrapping_shl(1));
+    }
+}
+
 /// `c[j][i]`: 2·(the coefficient of y[n0 - N + j] in output n0 + i) for the N outputs before
 /// a block, 0 where that sample is not among output i's N predecessors outside the block.
+#[cfg(not(all(target_arch = "x86_64", not(portable))))]
 #[inline(always)]
 fn hist_coefs<const N: usize>(a: &[i16]) -> [[i32; B]; N] {
     std::array::from_fn(|j| {
@@ -139,6 +191,7 @@ fn hist_coefs<const N: usize>(a: &[i16]) -> [[i32; B]; N] {
 
 /// `acc[i] -= Σ_j c[j][i]·h[j]`: the terms of the N outputs before a block, one pass of B
 /// lanes per history sample (wrapping: the callers' bounds keep every partial sum in range).
+#[cfg(not(all(target_arch = "x86_64", not(portable))))]
 #[inline(always)]
 fn hist_terms<const N: usize>(acc: &mut [i32; B], c: &[[i32; B]; N], h: &[i16; N]) {
     for (cj, &hj) in c.iter().zip(h) {
@@ -170,8 +223,8 @@ fn syn32_fast(
     for n0 in (0..lg).step_by(B) {
         let mut acc_lo = [0i32; B];
         let mut acc_hi: [i32; B] = std::array::from_fn(|i| 2 * exc[n0 + i] as i32 * a0 as i32);
-        hist_terms(&mut acc_lo, &c, lo[n0..n0 + M].try_into().unwrap());
-        hist_terms(&mut acc_hi, &c, hi[n0..n0 + M].try_into().unwrap());
+        hist_terms::<M>(&mut acc_lo, &c, lo[n0..n0 + M].try_into().unwrap());
+        hist_terms::<M>(&mut acc_hi, &c, hi[n0..n0 + M].try_into().unwrap());
         let (mut yh, mut yl) = ([0i32; B], [0i32; B]);
         for m in 0..B {
             let (mut sl, mut sh) = (acc_lo[m], acc_hi[m]);
@@ -248,7 +301,7 @@ pub(crate) fn wb_syn_fast<const N: usize>(
     let a2: [i32; B] = std::array::from_fn(|k| 2 * a[k] as i32);
     for (n0, xb) in (0..).step_by(B).zip(xy.as_chunks_mut::<B>().0) {
         let mut acc: [i32; B] = std::array::from_fn(|i| 2 * xb[i] as i32 * a0 as i32);
-        hist_terms(&mut acc, &c, yy[n0..n0 + N].try_into().unwrap());
+        hist_terms::<N>(&mut acc, &c, yy[n0..n0 + N].try_into().unwrap());
         let mut y = [0i32; B];
         for m in 0..B {
             let mut l = acc[m];
@@ -610,6 +663,43 @@ fn oversamp_interpolate_matches_portable() {
         clamped, [true; 2],
         "sums well past the 2^29 clamp, both signs"
     );
+}
+
+/// `hist_terms` (the AVX2 body on AVX2 hosts) and, in builds with the AVX2 copy, its non-AVX2
+/// body against the direct sum `acc - 2·Σ c·h` mod 2^32, both orders: full-scale (-32768
+/// pairs: `pmaddwd`'s wrap) and random coefficients and history.
+#[cfg(test)]
+#[test]
+fn hist_terms_matches_direct_sum() {
+    fn case<const N: usize>(r: &mut crate::testutil::Rng, k: usize) {
+        let a: [i16; M16K + 1] = std::array::from_fn(|_| match k % 3 {
+            0 => i16::MIN,
+            1 => [i16::MIN, i16::MAX][(r.u64() & 1) as usize],
+            _ => r.i16(),
+        });
+        let h: [i16; N] = std::array::from_fn(|_| match k % 3 {
+            0 => i16::MIN,
+            _ => r.i16(),
+        });
+        let acc0: [i32; B] = std::array::from_fn(|_| r.u64() as i32);
+        let c = hist_coefs::<N>(&a);
+        let (mut x, mut y) = (acc0, acc0);
+        hist_terms::<N>(&mut x, &c, &h);
+        #[cfg(all(target_arch = "x86_64", not(portable)))]
+        hist_terms_portable::<N>(&mut y, &c, &h); // the AVX2 copy's fallback and oracle
+        #[cfg(not(all(target_arch = "x86_64", not(portable))))]
+        hist_terms::<N>(&mut y, &c, &h);
+        let want: [i32; B] = std::array::from_fn(|i| {
+            let d: i64 = (i..N).map(|j| a[N + i - j] as i64 * h[j] as i64).sum();
+            (acc0[i] as i64 - 2 * d) as i32
+        });
+        assert_eq!((x, y), (want, want), "order {N} case {k}");
+    }
+    let mut r = crate::testutil::Rng::new(9);
+    for k in 0..20_000 {
+        case::<M>(&mut r, k);
+        case::<M16K>(&mut r, k);
+    }
 }
 
 /// `simd::fir32` (the AVX2 body where available) against its portable body on inputs up to

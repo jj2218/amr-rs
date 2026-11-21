@@ -607,7 +607,7 @@ fn a_refl_impl(a: &[i16; M], refl: &mut [i16; M], ov: &mut Flag) -> bool {
     undefined_in_c
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

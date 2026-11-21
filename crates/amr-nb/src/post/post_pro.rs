@@ -149,7 +149,7 @@ fn post_process_exact(st: &mut PostProcessState, signal: &mut [i16], lg: usize, 
         one_word_pairs(lg, u1, u2, (st.y1_hi, st.y1_lo), (st.y2_hi, st.y2_lo));
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

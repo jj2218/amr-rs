@@ -49,7 +49,7 @@ pub const N: usize = 200_000;
 /// Runs `f` on the TS 26.073 reference (`ref26073-sys`) holding its lock, with its global
 /// overflow flag cleared first and ORed into `o` after (unless null): the sticky opencore-style
 /// `Flag *pOverflow` the differential tests were written against.
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 pub fn with_ref<T>(o: *mut i32, f: impl FnOnce() -> T) -> T {
     let _l = ref26073_sys::lock();

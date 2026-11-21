@@ -6,20 +6,25 @@ dependencies; the only `unsafe` is `src/simd.rs` (runtime AVX2 dispatch, AVX2 ke
 vo-amrwbenc 0.1.3 (both Apache-2.0), each corrected to the specification wherever it differs.
 
 ```rust
-use amr_wb::{Decoder, L_FRAME, rfc4867};
+use amr_wb::{Decoder, Dtx, Encoder, L_FRAME, Mode, rfc4867};
 
-let mut dec = Decoder::new();
-let mut pcm = [0i16; L_FRAME]; // 20 ms at 16 kHz
-for frame in rfc4867::read_storage(&std::fs::read("speech.awb")?)? {
-    let f = frame?; // frames before a damaged one are still delivered
-    dec.decode(f.frame_type, f.mode, &f.bits, &mut pcm);
+fn main() -> Result<(), rfc4867::Error> {
+    let samples = vec![0i16; 50 * L_FRAME]; // one second of 16 kHz, 16-bit PCM
+
+    let mut enc = Encoder::new(Dtx::On); // comfort noise in pauses
+    let frames: Vec<_> = samples.as_chunks::<L_FRAME>().0.iter()
+        .map(|pcm| enc.encode(Mode::MD1265, pcm))
+        .collect();
+    let awb = rfc4867::write_storage(&frames)?; // the `.awb` file's bytes
+
+    let mut dec = Decoder::new();
+    let mut pcm = [0i16; L_FRAME]; // 20 ms at 16 kHz
+    for frame in rfc4867::read_storage(&awb)? {
+        let f = frame?; // frames before a damaged one are still delivered
+        dec.decode(f.frame_type, f.mode, &f.bits, &mut pcm);
+    }
+    Ok(())
 }
-
-let mut enc = amr_wb::Encoder::new(amr_wb::Dtx::On); // comfort noise in pauses
-let frames: Vec<_> = samples.as_chunks::<L_FRAME>().0.iter()
-    .map(|pcm| enc.encode(amr_wb::Mode::MD1265, pcm))
-    .collect();
-std::fs::write("out.awb", rfc4867::write_storage(&frames)?)?;
 ```
 
 A command-line example converts raw 16 kHz PCM to `.awb` and back:

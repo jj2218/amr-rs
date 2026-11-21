@@ -10,7 +10,7 @@
 pub(crate) mod codebook;
 mod dtx;
 pub(crate) mod gain_q;
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 mod kern;
 pub(crate) mod layout;
 pub(crate) mod lpc;
@@ -19,7 +19,7 @@ pub(crate) mod pitch_ol;
 mod vad;
 mod vad2;
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 pub(crate) mod vs_ref;
 
 use crate::basic_op::{Flag, add, extract_h, l_mult, l_shl, round, sub};

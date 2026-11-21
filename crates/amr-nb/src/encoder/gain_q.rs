@@ -1373,5 +1373,5 @@ pub(crate) fn gain_quant(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 pub(crate) mod vs_ref;

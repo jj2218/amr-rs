@@ -583,5 +583,5 @@ pub(crate) fn vad1(st: &mut VadState, buf: &[i16], ov: &mut Flag) -> i16 {
     vad_decision(st, &level, pow_sum, ov)
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 pub(crate) mod vs_ref;

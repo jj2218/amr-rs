@@ -242,7 +242,7 @@ fn add_scaled(dst: &mut [i16; L_SUBFR], imp: &[i16; L_SUBFR], c: i16) -> bool {
     o != 0
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;

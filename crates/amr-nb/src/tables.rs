@@ -1253,7 +1253,7 @@ pub(crate) static TRACKTABLE: [i16; 20] = [
     0, 1, 0, 1, -1, 0, -1, 1, 0, 1, 0, 1, 0, -1, 1, 0, 1, -1, 0, 1,
 ];
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_c {
     use opencore_sys as _; // links the C oracle

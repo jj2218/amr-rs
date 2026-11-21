@@ -141,63 +141,76 @@ continued. The codec targets diff against the TS 26.073 reference since 2026-11-
 | `nb_decode_vs_ref` | Rust decoder vs the TS 26.073 reference `Speech_Decode_Frame` (`ref26073-sys`), PCM equal frame by frame: every RX frame type (bad, degraded, onset, SID first/update/bad, NO_DATA), any mode and bits; stops at a homing frame (the reference homes in `decoder.c`) | 452,074 (600 s); 30 min: 1; after the fix 1,175,462 (1 h): 0 | 2,162 | defect 12 (DTX mute clamp, inherited from opencore), fixed; both saved crash inputs replay clean |
 | `nb_encode_vs_ref` | Rust encoder (DTX off / VAD1, per-frame mode from the input) vs the reference `Speech_Encode_Frame` + `sid_sync` on arbitrary PCM: TX type and serial bits equal | 550,312; 1,015,759 (1 h) | 5,518 | none |
 
-## Robustness: defects found in the legacy C (each absent in the Rust port)
+## Defects found in the C (opencore-amr; each absent in the Rust port)
+Each: **the defect**: its effect. Found: how. Rust: how the port avoids it.
 1. **No homing** (TS 26.073 encoder/decoder homing): raw opencore's decoder gets 1/191 on the
    official vectors (its encoder passes them only because their homing frames come first).
+   Found: the conformance vectors. Rust: both sides home as TS 26.073 specifies.
 2. **`const` contract violation**: `Encoder_Interface_Encode(…, const short* speech, …)`
-   overwrites the caller's buffer.
+   overwrites the caller's buffer. Found: the first differential harness (its input changed
+   after a call). Rust: the encoder takes the PCM by shared reference (`&[i16; L_FRAME]`).
 3. **Uninitialised memory read** in `A_Refl` (DTX comfort-noise path): branches on an
-   uninitialised stack array for some filters (valgrind-confirmed; ~8% of random valid-LSP filters).
+   uninitialised stack array for some filters (~8% of random valid-LSP filters). Found: the
+   module differential tests, confirmed by valgrind. Rust: every local is initialised.
 4. **Signed-overflow UB** in `L_add` as used by `gc_pred`: gcc removes the saturation check
-   (not reachable by the decoder; the Rust port saturates as specified).
+   (not reachable by the decoder). Found: the module differential tests. Rust: saturates as
+   specified.
 5. **Silent no-op on frame types 9–14**: `Decoder_Interface_Decode` writes no PCM and returns
-   `void`, so the caller plays stale or uninitialised samples (test:
-   `opencore_leaves_pcm_unwritten_for_unsupported_frame_types`). Rust: `Error::UnsupportedFrameType`.
-6. **No length check** (by inspection of `interf_dec.h`/`wmf_to_ets`): `Decoder_Interface_Decode`
-   takes no input length and reads the full frame size implied by the header byte, so a
-   truncated frame over-reads the caller's buffer. Rust: `Error::Truncated`.
+   `void`, so the caller plays stale or uninitialised samples. Found: test
+   `opencore_leaves_pcm_unwritten_for_unsupported_frame_types`. Rust: `Error::UnsupportedFrameType`.
+6. **No length check**: `Decoder_Interface_Decode` takes no input length and reads the full
+   frame size implied by the header byte, so a truncated frame over-reads the caller's buffer.
+   Found: inspection of `interf_dec.h`/`wmf_to_ets`. Rust: `Error::Truncated`.
 7. **Quality bit ignored**: frames marked damaged (Q = 0, RFC 4867 §4.3.2) decode identically
-   to good ones instead of being concealed (test: `opencore_ignores_the_quality_bit`).
+   to good ones instead of being concealed. Found: test `opencore_ignores_the_quality_bit`.
    Rust: maps them to `SpeechBad`/`SidBad`.
 8. **Oversized shift (UB) in the MR122 codebook gain** (`G_code`): `gain >>= i - 1` with
    `i - 1 >= 32` when the target and the filtered codevector are nearly orthogonal and the
    codevector energy is large. x86 masks the count and returns the gain *unshifted* (e.g. 16,236
-   where the denormalised gain is 0), so the result depends on the CPU and compiler. Found by
-   the `G_code` differential test on random input (5 of 200,000 cases); not reached by the vectors,
+   where the denormalised gain is 0), so the result depends on the CPU and compiler. Found: the
+   `G_code` differential test on random input (5 of 200,000 cases); not reached by the vectors,
    the 40,000-frame synthetic encoder differential or the fuzz run. Rust: gain 0.
 9. **No VAD option 2**: opencore ships `vad2.cpp`/`r_fft.cpp` but neither builds nor wires them
    (they don't compile as shipped: missing `l_deposit_h.h`, operators that exist only `inline`),
-   so it can't produce the DTX2 vectors. Rust: `Dtx::Vad2`, 11/11 DTX2 vectors bit-exact
-   (oracle for the module tests: those two files, built with a compat shim in `opencore-sys`).
-
+   so it can't produce the DTX2 vectors. Found: the DTX2 conformance vectors. Rust: `Dtx::Vad2`,
+   11/11 DTX2 vectors bit-exact (oracle for the module tests: those two files, built with a
+   compat shim in `opencore-sys`).
 10. **Wrapping where TS 26.073 saturates.** opencore's speed rewrites replace the saturating
     basic operators with plain `int` arithmetic in many places, and its `norm_s`/`norm_l`, `shl`,
     `L_shl`/`L_shr` (counts beyond ±15/31) and `L_mac` (no saturation when `L_var3` equals the
     product) differ from `basicop2.c`. Visible on full-scale input: 10 of the A-law/µ-law
     vectors and 1,598 of the 3,840 frame-sync vectors fail (table above; the reference
-    reproduces them all). Found in: `Residu`, `Syn_filt`, `Convolve`, `Pred_lt_3or6`,
+    reproduces them all). In: `Residu`, `Syn_filt`, `Convolve`, `Pred_lt_3or6`,
     `Interpol_3or6`, `Norm_Corr`, `G_pitch` (also denormalises the scaled `<xn,y1>` by 4
     instead of 2), `G_code`, `q_gain_code`, `cl_ltp`'s target update, `subframePostProc`,
     `Pre_Process`, `Autocorr` (re-sums with wrapping after scaling), `calc_unfilt_energies`,
     `calc_filt_energies`, `calc_target_energy`, `gc_pred`, `cor_h` (scaling threshold, `h2`,
     `mult(32767, 32440)`), `cor_h_x`/`cor_h_x2`, `set_sign12k2`, the codebook searches' compare
     and energy chains, MR122's filtered codevector, `MR475_gain_quant`'s search, `agc` and the
-    post-filter's energy chain.
+    post-filter's energy chain. Found: those vectors, then each function against the TS 26.073
+    reference (module differential tests). Rust: the reference's saturating operators.
 11. **The decoder's overflow re-synthesis is unreachable**: opencore's `Syn_filt` reports no
     overflow, so `Decoder_amr` never takes the reference's "scale the excitation by 1/4 and
-    re-synthesise" branch. Rust: `syn_filt` returns the reference's flag.
+    re-synthesise" branch. Found: the decoder differential against the TS 26.073 reference.
+    Rust: `syn_filt` returns the reference's flag.
 12. **DTX mute clamps the comfort-noise energy at 0**: entering DTX_MUTE (no SID update for
     50 frames), `dtx_dec` lowers `log_en` by 256 and opencore clamps it at 0 where TS 26.073
     saturates and lets it go negative; a low-energy SID followed by long silence then decodes
-    to different comfort noise. The Rust port had inherited the clamp; `nb_decode_vs_ref` found
-    it after 30 min of fuzzing and it is fixed (test
-    `decoder_matches_ref_through_dtx_mute`; the vectors never reach it).
+    to different comfort noise (the vectors never reach it). Found: fuzzing `nb_decode_vs_ref`
+    (30 min); the port had inherited the clamp. Rust: fixed (test
+    `decoder_matches_ref_through_dtx_mute`).
 
 Also differs from the current reference, not a bug: `dtx_enc` recomputes the SID parameters
 while `log_en_index == 0` (an older reference version; the vectors pass either way, the Rust
 port follows the current one). And opencore's unrolled loops drop the remainder (`Syn_filt` an
 odd last sample, `Residu` the first `lg % 4`, `Pred_lt_3or6` an odd last one; the codec only
 uses lengths 22 and 40).
+
+## Improvements over the C (opencore-amr)
+1. **RFC 4867 in full**: bandwidth-efficient RTP payloads and `.amr` file headers, which opencore
+   lacks (it reads and writes octet-aligned frames only). Found: opencore's interface
+   (`interf_dec.h`, `interf_enc.h`). Rust: `amr_nb::rfc4867`, checked by round trip,
+   hand-derived layouts and the conformance rows above.
 
 The Rust codec's only `unsafe` is `src/simd.rs` (runtime AVX2 dispatch and SSE2 transposes),
 plus FFI in the tests.
@@ -310,41 +323,6 @@ outputs it made), saturations collapsed into one clamp (a clamp is monotone), en
 closed form, the synthesis filters in blocks with only in-block terms serial, and the
 follow-on filters run beside them per block.
 
-### Robustness: defects found in opencore's AMR-WB decoder (each absent in the Rust port)
-1. **Wrapping where TS 26.173 saturates** (as amr-nb's defect 10): `HP50_12k8`, `Pred_lt4`,
-   the adaptive codebook's low-pass, `Deemph_32`, `Syn_filt_32`, `Syn_filt`, `Isp_Az` and its
-   polynomials, the noise enhancer (`Mpy_32_16`, `L_add`), the code's tilt filter (it sums two
-   neighbours into one 16-bit argument), `Filt_6k_7k` and `Filt_7k` (which also pre-adds the end
-   taps' samples in 16 bits). On loud signals: 32 of the 221 vectors fail.
-2. **`round` wraps** for `[0x7fff8000, 0x7ffffffe]` to −32768 (only `MAX_32` is special-cased);
-   the same for its `round(x << 1)`.
-3. **Shift counts masked**: `shl`, `L_shl`, `L_shr` take counts modulo 16 or 32 where the
-   specification saturates them; in `voice_factor` and `agc2` plain C shifts by a negative
-   count or one ≥ 32 (UB; x86 masks, `agc2` shifts by 31 instead of halving), and `Pow2`'s
-   final shift likewise for loud comfort noise.
-4. **`norm_s`/`norm_l` of 0 and negative values**: `norm_s(0)` is 11, not 0 (a zero code gain
-   then skews the voicing after lost frames).
-5. **`Scale_sig(x, -3)` saturates in 16 bits**: 32764..32767 become 4095, not 4096, in the
-   excitation's energy and the high band's level.
-6. **The synthesis filters assume `a[0]` = 4096**: `Isp_Az` lowers `a[0]` (adaptive scaling)
-   for comfort noise, which the specification's `Syn_filt_32` and `Syn_filt` follow and
-   opencore's ignore, so its comfort noise comes out louder after rescaling.
-7. **Concealment gains**: the gain histories' pipelined shift leaves `[b1, b1, b2, b3, new]`
-   instead of `[b1, b2, b3, b4, new]`, a bad frame's energy history keeps its oldest entry, and
-   the mean of the past energies is `Σ/8` instead of `Σ/4`: wrong gains after every bad frame.
-8. **DTX mute clamps the comfort-noise energy at 0** (as amr-nb's defect 12), where the
-   specification lets it go negative.
-9. **No CR 0026**: in DTX_MUTE right after a SID update opencore divides by zero
-   (`div_16by16(1024, 0)` returns 0 there), and a late SID_UPDATE mutes.
-10. **The quality bit is ignored**: `D_IF_decode` sets `quality = 1` (as its AMR-NB
-   interface, amr-nb's defect 7), so frames marked damaged (Q = 0) decode like good ones instead
-   of being concealed (pinned: `opencore_ignores_the_quality_bit`).
-11. **`Isf_isp` reads past its cosine table** (also the TS 26.173 reference): at ISF 16384 it
-   reads `table[129]` of 129 entries, times offset 0, so the value is right but the read is
-   out of bounds; in Rust it panicked (index out of bounds). Comfort noise reaches it: after a
-   SID_FIRST averages a history of maximal speech ISFs, the dithering pushes ISF 14 past
-   16384 and clamps it there. Now indexed exactly (`ind ≤ 127`, `offset ≤ 128`, same value).
-
 ## amr-wb encoder (AMR-WB, TS 26.190)
 The AMR-WB encoder, ported from vo-amrwbenc 0.1.3 (Apache-2.0) module by module, with the
 saturation of the TS 26.173 reference (vo's `vo_*` macros and plain sums wrap where it
@@ -417,3 +395,66 @@ on par with vo-amrwbenc.
 Exact fast paths under proven bounds (the reference's saturation is kept: every guard falls
 back to its chain, each with a mutant-checked differential test), the hot kernels dispatched
 to AVX2 per call.
+
+### Defects found in the C (opencore's decoder, vo-amrwbenc; each absent in the Rust port)
+Each: **the defect**: its effect. Found: how. Rust: how the port avoids it. Items 1–11 are
+opencore's AMR-WB decoder; item 12 is vo-amrwbenc. "Stage hashes": the faithful opencore port's
+intermediate signals hashed per stage against the TS 26.173 reference's; "stress
+differential": the whole decoder against the reference on 1,600 loud and comfort-noise streams.
+1. **Wrapping where TS 26.173 saturates** (as amr-nb's defect 10): `HP50_12k8`, `Pred_lt4`,
+   the adaptive codebook's low-pass, `Deemph_32`, `Syn_filt_32`, `Syn_filt`, `Isp_Az` and its
+   polynomials, the noise enhancer (`Mpy_32_16`, `L_add`), the code's tilt filter (it sums two
+   neighbours into one 16-bit argument), `Filt_6k_7k` and `Filt_7k` (which also pre-adds the end
+   taps' samples in 16 bits). On loud signals: 32 of the 221 vectors fail. Found: the vectors,
+   stage hashes, the stress differential and the module tests. Rust: the reference's
+   saturating operators.
+2. **`round` wraps** for `[0x7fff8000, 0x7ffffffe]` to −32768 (only `MAX_32` is special-cased);
+   the same for its `round(x << 1)`. Found: stage hashes. Rust: saturates.
+3. **Shift counts masked**: `shl`, `L_shl`, `L_shr` take counts modulo 16 or 32 where the
+   specification saturates them; in `voice_factor` and `agc2` plain C shifts by a negative
+   count or one ≥ 32 (UB; x86 masks, `agc2` shifts by 31 instead of halving), and `Pow2`'s
+   final shift likewise for loud comfort noise. Found: the stress differential. Rust: the
+   specification's shifts.
+4. **`norm_s`/`norm_l` of 0 and negative values**: `norm_s(0)` is 11, not 0 (a zero code gain
+   then skews the voicing after lost frames). Found: the stress differential. Rust: the
+   specification's `norm_s`/`norm_l`.
+5. **`Scale_sig(x, -3)` saturates in 16 bits**: 32764..32767 become 4095, not 4096, in the
+   excitation's energy and the high band's level. Found: stage hashes. Rust: scales in 32 bits
+   as specified.
+6. **The synthesis filters assume `a[0]` = 4096**: `Isp_Az` lowers `a[0]` (adaptive scaling)
+   for comfort noise, which the specification's `Syn_filt_32` and `Syn_filt` follow and
+   opencore's ignore, so its comfort noise comes out louder after rescaling. Found: the stress
+   differential. Rust: the filters scale by `a[0]`.
+7. **Concealment gains**: the gain histories' pipelined shift leaves `[b1, b1, b2, b3, new]`
+   instead of `[b1, b2, b3, b4, new]`, a bad frame's energy history keeps its oldest entry, and
+   the mean of the past energies is `Σ/8` instead of `Σ/4`: wrong gains after every bad frame.
+   Found: the stress differential. Rust: the specification's histories.
+8. **DTX mute clamps the comfort-noise energy at 0** (as amr-nb's defect 12), where the
+   specification lets it go negative. Found: the stress differential. Rust: no clamp.
+9. **No CR 0026**: in DTX_MUTE right after a SID update opencore divides by zero
+   (`div_16by16(1024, 0)` returns 0 there), and a late SID_UPDATE mutes. Found: the stress
+   differential. Rust: the CR's handling, as the reference.
+10. **The quality bit is ignored**: `D_IF_decode` sets `quality = 1` (as its AMR-NB
+   interface, amr-nb's defect 7), so frames marked damaged (Q = 0) decode like good ones instead
+   of being concealed. Found: test `opencore_ignores_the_quality_bit`. Rust: such frames are
+   concealed.
+11. **`Isf_isp` reads past its cosine table** (also the TS 26.173 reference): at ISF 16384 it
+   reads `table[129]` of 129 entries, times offset 0, so the value is right but the read is
+   out of bounds. Comfort noise reaches it: after a SID_FIRST averages a history of maximal
+   speech ISFs, the dithering pushes ISF 14 past 16384 and clamps it there. Found: a bound per
+   table lookup over the generated tables (the fuzzer did not reach it), then a crafted stream;
+   the port panicked (index out of bounds). Rust: indexed exactly (`ind ≤ 127`,
+   `offset ≤ 128`, same value).
+12. **vo-amrwbenc wraps where TS 26.173 saturates**: its `vo_*` macros and plain sums wrap, and
+   it fails 95 of the 3,101 encoder vectors (90 of them also on those from before CRs 0032/0036).
+   Found: the encoder conformance set. Rust: every `vo_*` macro back to its
+   saturating operator (3,101/3,101).
+
+### Improvements over the C (opencore's decoder, vo-amrwbenc)
+1. **The encoder has CRs 26.173-0032 and -0036** (pitch-gain clipping at 6.60/8.85 kbit/s,
+   `c4t64fx` impulse-response scaling), which vo-amrwbenc predates. Found: the 3GPP change
+   history against vo-amrwbenc 0.1.3. Rust: both, mutant-checked (`Gp_clip`, CR 0036's scaling).
+2. **Bandwidth-efficient RTP payloads and `.awb` file headers**, which opencore's decoder
+   lacks (`D_IF_decode` reads octet-aligned frames only, `mime_unsorting`). Found: opencore's
+   `amrwb/wrapper.cpp`. Rust: `amr_wb::rfc4867`, checked against the TS 26.173 reference's
+   `Read_serial`/`Write_serial` (Packed formats above).

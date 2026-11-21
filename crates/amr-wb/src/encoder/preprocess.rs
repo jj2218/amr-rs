@@ -57,7 +57,7 @@ fn down_samp(sig: &[i16], sig_d: &mut [i16]) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, oracle))]
 #[allow(unsafe_code)]
 mod vs_ref {
     use super::*;
